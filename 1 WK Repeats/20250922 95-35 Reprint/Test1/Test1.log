@@ -1,0 +1,27 @@
+22/09/2025,10:28:35,20250919 95-35 Reprint,Test1,60101,Log File Created
+22/09/2025,10:28:35,20250919 95-35 Reprint,Test1,60104,Software Version,2.1.20079.01
+22/09/2025,10:28:35,20250919 95-35 Reprint,Test1,60105,Console Version,10.2.20286.1
+22/09/2025,10:28:35,20250919 95-35 Reprint,Test1,60106,Controller Version,24.00.20200916
+22/09/2025,10:28:35,20250919 95-35 Reprint,Test1,60107,User Name,Canterbury
+22/09/2025,10:28:35,20250919 95-35 Reprint,Test1,60108,Computer Name,DESKTOP-FOFC6BR
+22/09/2025,10:28:35,20250919 95-35 Reprint,Test1,60109,System Name,
+22/09/2025,10:28:35,20250919 95-35 Reprint,Test1,60110,Frame Serial Number (System ID),E3BMTB23326
+22/09/2025,10:28:35,20250919 95-35 Reprint,Test1,60110,Test Started
+22/09/2025,10:28:35,20250919 95-35 Reprint,Test1,60300,Tuning Settings (Linear) - Load String Stiffness(N/mm) = 286.701
+22/09/2025,10:28:35,20250919 95-35 Reprint,Test1,60300,Tuning Settings (Linear:Position) - Stiffness Based Tuning state = FixedTuning  
+22/09/2025,10:28:35,20250919 95-35 Reprint,Test1,60300,Tuning Settings (Linear:Load) - Stiffness Based Tuning state = AutoTuned  : Optimized Gain(dB) = 0.0 
+22/09/2025,10:28:35,20250919 95-35 Reprint,Test1,60300,Tuning Settings (Linear:Digital Position) - Stiffness Based Tuning state = AutoTuned  : Optimized Gain(dB) = 0.0 
+22/09/2025,10:45:41,20250919 95-35 Reprint,Test1,880014,Device is not at full (high) power
+22/09/2025,10:45:41,20250919 95-35 Reprint,Test1,880014,Device is not at full (high) power
+22/09/2025,10:45:41,20250919 95-35 Reprint,Test1,8802909,Linear lost Computer Control during a test
+22/09/2025,10:45:41,20250919 95-35 Reprint,Test1,8802909,Rotary is not in Computer Control
+22/09/2025,10:45:41,20250919 95-35 Reprint,Test1,60201,Test Status,Test Paused Unexpectedly
+22/09/2025,10:45:41,20250919 95-35 Reprint,Test1,60120,Total Time,1026.047
+22/09/2025,10:45:42,20250919 95-35 Reprint,Test1,60121,Total Cycle Count(Linear Waveform),1000
+22/09/2025,10:45:42,20250919 95-35 Reprint,Test1,60122,Step,4,Step 4
+22/09/2025,10:45:42,20250919 95-35 Reprint,Test1,60123,Loop 1,1
+22/09/2025,10:45:42,20250919 95-35 Reprint,Test1,60111,Test Paused
+22/09/2025,10:46:21,20250919 95-35 Reprint,Test1,62000,SHA-256,Test1.steps.tracking.csv,5A347A2EAC491371B67395B8943A52094469F57D29E2F6DFEA428E761B47BA39
+22/09/2025,10:46:21,20250919 95-35 Reprint,Test1,62000,SHA-256,Test1.steps.trends.csv,203836020DA5D55BE0273B08AB7253DF34BA4BF712AE9D21FEADE52740DB23B9
+22/09/2025,10:46:21,20250919 95-35 Reprint,Test1,62000,SHA-256,Test1.Stop.csv,8C33E745CE640FD39676DAB3EEE55D4AFBD420B5445D310066970F3357AB038D
+22/09/2025,10:46:21,20250919 95-35 Reprint,Test1,60103,Closed
