@@ -48,6 +48,9 @@ def extract_parameters_from_filename(folder_name):
         filament_svf = parts[1]
         if '-' in filament_svf:
             filament, svf = filament_svf.split('-')
+            # Fix typo: convert 21 to 20 for consistency
+            if svf == '21':
+                svf = '20'
             return int(filament), int(svf)
     return None, None
 
@@ -611,7 +614,7 @@ def plot_by_filament_type(data_by_combination, test_name):
         
         ax.set_xlabel('Cycle Number')
         ax.set_ylabel('Average Peak Force (kN)')
-        ax.set_title(f'{test_name} Average Peak Force vs Cycle - SVF {svf}%\n(Comparison across Filament Types)')
+        ax.set_title(f'{test_name} Peak Force vs Cycle (Averaged across two sets) - SVF {svf}%\n(Comparison across Filament Types)')
         ax.legend()
         ax.grid(True, alpha=0.3)
         
@@ -998,7 +1001,7 @@ def plot_cross_test_peak_force_comparison(base_path):
         if plot_created:
             ax.set_xlabel('Cycle Number', fontsize=12)
             ax.set_ylabel('Average Peak Force (kN)', fontsize=12)
-            ax.set_title(f'Cross-Test Peak Force vs Cycle Comparison\n{filament_name}, SVF {svf}%\n(Averaged over normal & reprint tests)', fontsize=14, fontweight='bold')
+            ax.set_title(f'All Tests Peak Force vs Cycle (Averaged across two sets)\n{filament_name}, SVF {svf}%', fontsize=14)
             ax.legend(fontsize=11)
             ax.grid(True, alpha=0.3)
             
@@ -1183,8 +1186,8 @@ def plot_cross_test_cycle_comparison(base_path, target_cycles=[1, 100, 1000]):
             if plot_created:
                 ax.set_xlabel('Displacement (mm)', fontsize=12)
                 ax.set_ylabel('Force (kN)', fontsize=12)
-                ax.set_title(f'Cross-Test Force vs Displacement - Cycle {target_cycle}\n{filament_name}, SVF {svf}%\n(Averaged over normal & reprint tests)', 
-                            fontsize=14, fontweight='bold')
+                ax.set_title(f'All Tests Force vs Displacement (Averaged across two sets) - Cycle {target_cycle}\n{filament_name}, SVF {svf}%', 
+                            fontsize=14)
                 
                 ax.legend(fontsize=11, loc='best')
                 ax.grid(True, alpha=0.3)
@@ -1212,6 +1215,213 @@ def plot_cross_test_cycle_comparison(base_path, target_cycles=[1, 100, 1000]):
     print(f"  Cross-test cycle comparison plots saved in: {cycle_comparison_dir}")
     print(f"  Organization: Each cycle has its own subdirectory with separate plots for each filament-SVF combination")
 
+def plot_cross_test_vs_comparison(base_path):
+    """
+    Compare peak force vs cycle curves (averaged over two sets) between similar vertical stiffnesses 
+    (within 40 N/mm) across all tests. Creates plots showing how different VS groups perform 
+    across all test conditions.
+    """
+    print("\nGenerating cross-test vertical stiffness comparison plots...")
+    
+    # Define all test weeks
+    test_weeks = ['0 WK', '1 WK Repeats', '2 WK Repeats', '3 WK Repeats']
+    
+    # Collect data from all tests with vertical stiffness information
+    all_test_data = {}
+    all_vs_values = set()
+    
+    for week_folder in test_weeks:
+        test_name = get_test_name(week_folder)
+        week_path = Path(base_path) / week_folder
+        
+        if week_path.exists():
+            print(f"  Loading data from {test_name} ({week_folder})...")
+            data_by_combination = analyze_week_data(base_path, week_folder)
+            
+            if data_by_combination:
+                all_test_data[test_name] = data_by_combination
+                # Collect all VS values
+                for combo_data in data_by_combination.values():
+                    all_vs_values.add(combo_data['vs'])
+    
+    if not all_test_data:
+        print("  No data found across all tests, skipping cross-test VS comparison...")
+        return
+    
+    # Group similar vertical stiffnesses across all tests (within 40 N/mm tolerance)
+    all_vs_list = sorted(list(all_vs_values))
+    vs_groups = []
+    used_vs = set()
+    
+    for vs in all_vs_list:
+        if vs in used_vs:
+            continue
+            
+        # Find all VS values within 40 N/mm tolerance
+        group = [vs]
+        used_vs.add(vs)
+        
+        for other_vs in all_vs_list:
+            if other_vs != vs and other_vs not in used_vs:
+                if abs(vs - other_vs) <= 40:  # 40 N/mm tolerance
+                    group.append(other_vs)
+                    used_vs.add(other_vs)
+        
+        vs_groups.append(sorted(group))
+    
+    print(f"  Found {len(vs_groups)} vertical stiffness groups across all tests:")
+    for i, group in enumerate(vs_groups):
+        vs_range = f"{min(group)}-{max(group)}" if len(group) > 1 else str(group[0])
+        print(f"    VS Group {i+1}: {vs_range} N/mm ({len(group)} values)")
+    
+    # Create output directory
+    output_dir = Path('Cross Test Comparison analysis_results')
+    vs_comparison_dir = output_dir / 'Cross Test vertical_stiffness_comparison'
+    vs_comparison_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Create plots for each VS group
+    for group_idx, vs_group in enumerate(vs_groups):
+        # Check if this group has different combinations (different filament OR SVF)
+        # Collect all combinations in this VS group across all tests
+        combinations_in_group = []
+        test_combination_count = {}  # Track which tests have which combinations
+        
+        for test_name, test_data in all_test_data.items():
+            test_combination_count[test_name] = []
+            for combo_key, combo_data in test_data.items():
+                if combo_data['vs'] in vs_group:
+                    filament, svf = combo_data['filament'], combo_data['svf']
+                    combinations_in_group.append((filament, svf))
+                    test_combination_count[test_name].append((filament, svf))
+        
+        # Check if we have different combinations (not just same filament-SVF with different VS)
+        unique_combinations = set(combinations_in_group)
+        if len(unique_combinations) <= 1:
+            print(f"  Skipping VS Group {group_idx+1} - only contains identical filament-SVF combinations")
+            continue
+        
+        # Check that we have at least 2 tests with data for this VS group
+        tests_with_data = sum(1 for test_combos in test_combination_count.values() if len(test_combos) > 0)
+        if tests_with_data < 2:
+            print(f"  Skipping VS Group {group_idx+1} - appears in fewer than 2 tests ({tests_with_data} test(s))")
+            continue
+        
+        # Check that we have sufficient combinations across tests
+        total_data_points = len(combinations_in_group)
+        if total_data_points < 4:  # Need at least 4 data points for meaningful comparison
+            print(f"  Skipping VS Group {group_idx+1} - insufficient data points ({total_data_points} total)")
+            continue
+        
+        print(f"  Processing VS Group {group_idx+1} with {len(unique_combinations)} unique combinations across {tests_with_data} tests")
+        for test_name, combos in test_combination_count.items():
+            if combos:
+                combo_names = [f"{get_filament_name(f)}-SVF{s}%" for f, s in set(combos)]
+                print(f"    {test_name}: {', '.join(combo_names)}")
+        
+        fig, ax = plt.subplots(1, 1, figsize=(14, 10))
+        
+        # Colors for different tests
+        test_colors = {'Test 1': 'blue', 'Test 2': 'red', 'Test 3': 'green', 'Test 4': 'orange'}
+        
+        plot_created = False
+        
+        # Plot data for each test and each individual combination
+        line_styles = ['-', '--', '-.', ':']
+        
+        for test_name, test_data in all_test_data.items():
+            test_color = test_colors.get(test_name, 'black')
+            
+            # Plot each combination individually for this test
+            combo_idx = 0
+            for combo_key, combo_data in test_data.items():
+                if combo_data['vs'] in vs_group:
+                    filament, svf = combo_data['filament'], combo_data['svf']
+                    filament_name = get_filament_name(filament)
+                    combo_label = f"{filament_name}-SVF{svf}%"
+                    
+                    # Combine normal and reprint data for this specific combination
+                    all_cycles_for_combo = []
+                    all_forces_for_combo = []
+                    
+                    # Add normal test data
+                    if 'normal' in combo_data and combo_data['normal']:
+                        cycles = combo_data['normal']['cycles']
+                        forces = combo_data['normal']['peak_forces']
+                        all_cycles_for_combo.extend(cycles)
+                        all_forces_for_combo.extend(forces)
+                    
+                    # Add reprint test data  
+                    if 'reprint' in combo_data and combo_data['reprint']:
+                        cycles = combo_data['reprint']['cycles']
+                        forces = combo_data['reprint']['peak_forces']
+                        all_cycles_for_combo.extend(cycles)
+                        all_forces_for_combo.extend(forces)
+                    
+                    if all_cycles_for_combo and all_forces_for_combo:
+                        # Use same binning approach as other functions
+                        max_cycle = max(all_cycles_for_combo)
+                        bin_edges = np.linspace(1, max_cycle, min(100, max_cycle))
+                        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+                        
+                        binned_forces = []
+                        for i in range(len(bin_edges) - 1):
+                            mask = (np.array(all_cycles_for_combo) >= bin_edges[i]) & (np.array(all_cycles_for_combo) < bin_edges[i+1])
+                            if np.any(mask):
+                                binned_forces.append(np.mean(np.array(all_forces_for_combo)[mask]))
+                            else:
+                                binned_forces.append(np.nan)
+                        
+                        # Remove NaN values for plotting
+                        valid_mask = ~np.isnan(binned_forces)
+                        if np.any(valid_mask):
+                            # Use different line styles for different combinations
+                            line_style = line_styles[combo_idx % len(line_styles)]
+                            
+                            # Create label for this specific combination
+                            normal_count = len(combo_data.get('normal', {}).get('cycles', [])) if 'normal' in combo_data else 0
+                            reprint_count = len(combo_data.get('reprint', {}).get('cycles', [])) if 'reprint' in combo_data else 0
+                            set_info = f"N+R" if normal_count > 0 and reprint_count > 0 else ("N" if normal_count > 0 else "R")
+                            
+                            label = f'{test_name} - {combo_label} (VS={combo_data["vs"]:.1f}, {set_info})'
+                            
+                            ax.plot(bin_centers[valid_mask], np.array(binned_forces)[valid_mask], 
+                                   line_style, color=test_color, label=label, 
+                                   linewidth=2, alpha=0.8, marker='o', markersize=3)
+                            plot_created = True
+                            combo_idx += 1
+        
+        if plot_created:
+            ax.set_xlabel('Cycle Number', fontsize=12)
+            ax.set_ylabel('Average Peak Force (kN)', fontsize=12)
+            
+            # Create title with VS range and combination info
+            vs_range = f"{min(vs_group)}-{max(vs_group)}" if len(vs_group) > 1 else str(vs_group[0])
+            combo_summary = ", ".join([f"{get_filament_name(f)}-SVF {s}%" for f, s in sorted(unique_combinations)])
+            ax.set_title(f'Cross-Test Peak Force vs Cycle Comparison (Individual Combinations, Averaged over two sets)\nSimilar Vertical Stiffnesses: {vs_range} N/mm\nCombinations: {combo_summary}', 
+                        fontsize=14)
+            
+            ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=9)
+            ax.grid(True, alpha=0.3)
+            
+            # Add VS group annotation
+            ax.text(0.02, 0.98, f'VS Group {group_idx+1}\n{vs_range} N/mm\n(Individual Lines)', 
+                   transform=ax.transAxes, 
+                   bbox=dict(boxstyle='round,pad=0.5', facecolor='lightgreen', alpha=0.9),
+                   verticalalignment='top', fontsize=11, fontweight='bold')
+            
+            plt.tight_layout()
+            
+            # Save plot
+            output_path = vs_comparison_dir / f'Cross_Test_VS_Group_{group_idx+1}_{vs_range}_Nmm_individual_combinations.png'
+            plt.savefig(output_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            print(f"  Cross-test VS comparison for Group {group_idx+1} ({vs_range} N/mm) saved as: {output_path}")
+        else:
+            plt.close()
+            print(f"  No data found for VS Group {group_idx+1} ({vs_range} N/mm)")
+    
+    print(f"  Cross-test vertical stiffness comparison plots saved in: {vs_comparison_dir}")
+
 def get_test_name(folder_name):
     """
     Convert folder name to test name
@@ -1228,8 +1438,8 @@ def main():
     """
     Main analysis function
     """
-    # Set the base path to your data directory
-    base_path = r"p:\M48 FYP FEA\Compression Data Analysis\FYP-Cyclic-Compression-Data-Analysis"
+    # Set the base path to the directory where this script is located
+    base_path = Path(__file__).parent.resolve()
     
     print("Starting cyclic compression data analysis...")
     
@@ -1309,12 +1519,16 @@ def main():
     # Plot specific cycles for every filament-SVF combination across all tests
     plot_cross_test_cycle_comparison(base_path, [1, 100, 1000])
     
+    # Plot vertical stiffness comparison across all tests
+    plot_cross_test_vs_comparison(base_path)
+    
     print(f"\n{'='*60}")
     print("ALL ANALYSIS COMPLETE!")
     print("Generated:")
     print("1. Individual test plots for each test week")
     print("2. Cross-test peak force comparison plots for each filament-SVF combination")
     print("3. Cross-test cycle comparison plots showing all combinations for cycles 1, 100, 1000")
+    print("4. Cross-test vertical stiffness comparison plots for similar VS groups (within 40 N/mm)")
     print(f"{'='*60}")
 
 if __name__ == "__main__":
