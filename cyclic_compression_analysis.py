@@ -17,17 +17,17 @@ def get_filament_name(filament_number):
     filament_map = {87: 'TPU87A', 90: 'TPU90A', 95: 'TPU95A'}
     return filament_map.get(filament_number, f'TPU{filament_number}A')
 
-def create_output_directories():
+def create_output_directories(test_name):
     """
     Create output directories for organizing plots
     """
-    base_dir = Path('Test 1 analysis_results')
+    base_dir = Path(f'{test_name} analysis_results')
     dirs = [
-        base_dir / 'Test 1 vertical_stiffness_comparison',
-        base_dir / 'Test 1 force_displacement_cycles',
-        base_dir / 'Test 1 force_displacement_by_vs_groups',
-        base_dir / 'Test 1 by_filament_type',
-        base_dir / 'Test 1 by_svf_percentage'
+        base_dir / f'{test_name} vertical_stiffness_comparison',
+        base_dir / f'{test_name} force_displacement_cycles',
+        base_dir / f'{test_name} force_displacement_by_vs_groups',
+        base_dir / f'{test_name} by_filament_type',
+        base_dir / f'{test_name} by_svf_percentage'
     ]
     
     for dir_path in dirs:
@@ -144,18 +144,18 @@ def load_tracking_data(file_path):
         print(f"Error loading {file_path}: {e}")
         return None
 
-def analyze_week0_data(base_path):
+def analyze_week_data(base_path, week_folder_name):
     """
-    Analyze Week 0 data including normal and reprint folders
+    Analyze week data including normal and reprint folders
     Calculate vertical stiffness from first cycle data
     """
-    week0_path = Path(base_path) / "0 WK"
+    week_path = Path(base_path) / week_folder_name
     
     # Dictionary to store data organized by Filament-SVF-VS combination
     data_by_combination = {}
     
-    # Find all folders in week 0
-    for folder in week0_path.iterdir():
+    # Find all folders in the specified week
+    for folder in week_path.iterdir():
         if folder.is_dir():
             filament, svf = extract_parameters_from_filename(folder.name)
             if filament is not None and svf is not None:
@@ -322,7 +322,7 @@ def plot_vs_groups(data_by_combination, vs_groups):
         plt.close()
         print(f"VS Group {group_idx+1} ({vs_range} N/mm) with different combinations saved as: {output_path}")
 
-def plot_specific_cycles_force_displacement(data_by_combination, cycles_of_interest=[1, 100, 1000]):
+def plot_specific_cycles_force_displacement(data_by_combination, test_name, cycles_of_interest=[1, 100, 1000]):
     """
     Plot 3: Individual force vs displacement plots for each combination, showing all cycles on one plot
     Only plot averages with normalized displacement (0 to -6mm range)
@@ -444,7 +444,7 @@ def plot_specific_cycles_force_displacement(data_by_combination, cycles_of_inter
         ax.set_xlabel('Displacement (mm)')
         ax.set_ylabel('Force (kN)')
         filament_name = get_filament_name(filament)
-        ax.set_title(f'Test 1 Force vs Displacement (Averaged over two sets) - {filament_name}, SVF {svf}%\n(Cycles 1, 100, 1000)')
+        ax.set_title(f'{test_name} Force vs Displacement (Averaged over two sets) - {filament_name}, SVF {svf}%\n(Cycles 1, 100, 1000)')
         ax.legend()
         ax.grid(True, alpha=0.3)
         
@@ -455,7 +455,7 @@ def plot_specific_cycles_force_displacement(data_by_combination, cycles_of_inter
         
         # Save individual combination plot with Filament and SVF identification
         filament_name_file = get_filament_name(filament)
-        output_path = Path(f'Test 1 analysis_results/Test 1 force_displacement_cycles/Test 1 {filament_name_file}_SVF_{svf}_percent_force_displacement_cycles.png')
+        output_path = Path(f'{test_name} analysis_results/{test_name} force_displacement_cycles/{test_name} {filament_name_file}_SVF_{svf}_percent_force_displacement_cycles.png')
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close()
         print(f"Force-displacement plot for {filament_name}, SVF {svf}% saved as: {output_path}")
@@ -540,7 +540,7 @@ def plot_combined_average_by_vs(data_by_combination):
     plt.close()
     print(f"Combined VS average plot saved as: {output_path}")
 
-def plot_by_filament_type(data_by_combination):
+def plot_by_filament_type(data_by_combination, test_name):
     """
     Plot 6: Average peak force vs cycle grouped by filament type (same SVF, different filaments)
     """
@@ -611,7 +611,7 @@ def plot_by_filament_type(data_by_combination):
         
         ax.set_xlabel('Cycle Number')
         ax.set_ylabel('Average Peak Force (kN)')
-        ax.set_title(f'Test 1 Average Peak Force vs Cycle - SVF {svf}%\n(Comparison across Filament Types)')
+        ax.set_title(f'{test_name} Average Peak Force vs Cycle - SVF {svf}%\n(Comparison across Filament Types)')
         ax.legend()
         ax.grid(True, alpha=0.3)
         
@@ -623,12 +623,12 @@ def plot_by_filament_type(data_by_combination):
         plt.tight_layout()
         
         # Save plot
-        output_path = Path(f'Test 1 analysis_results/Test 1 by_filament_type/Test 1 SVF_{svf}_percent_filament_comparison.png')
+        output_path = Path(f'{test_name} analysis_results/{test_name} by_filament_type/{test_name} SVF_{svf}_percent_filament_comparison.png')
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close()
         print(f"Filament comparison plot for SVF {svf}% saved as: {output_path}")
 
-def plot_by_svf_percentage(data_by_combination):
+def plot_by_svf_percentage(data_by_combination, test_name):
     """
     Plot 7: Average peak force vs cycle grouped by SVF percentage (same filament, different SVFs)
     """
@@ -699,7 +699,7 @@ def plot_by_svf_percentage(data_by_combination):
         ax.set_xlabel('Cycle Number')
         ax.set_ylabel('Average Peak Force (kN)')
         filament_name = get_filament_name(filament)
-        ax.set_title(f'Test 1 Peak Force vs Cycle (Averaged over two sets) - {filament_name}\n(Comparison across SVF Percentages)')
+        ax.set_title(f'{test_name} Peak Force vs Cycle (Averaged over two sets) - {filament_name}\n(Comparison across SVF Percentages)')
         ax.legend()
         ax.grid(True, alpha=0.3)
         
@@ -712,7 +712,7 @@ def plot_by_svf_percentage(data_by_combination):
         
         # Save plot
         filament_name_file = get_filament_name(filament)
-        output_path = Path(f'Test 1 analysis_results/Test 1 by_svf_percentage/Test 1 {filament_name_file}_SVF_comparison.png')
+        output_path = Path(f'{test_name} analysis_results/{test_name} by_svf_percentage/{test_name} {filament_name_file}_SVF_comparison.png')
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close()
         print(f"SVF comparison plot for {filament_name} saved as: {output_path}")
@@ -890,6 +890,18 @@ def plot_specific_cycles_by_vs_groups(data_by_combination, vs_groups, target_cyc
                 plt.close()
                 print(f"No data found for cycle {target_cycle} in VS Group {group_idx+1} ({vs_range} N/mm)")
 
+def get_test_name(folder_name):
+    """
+    Convert folder name to test name
+    """
+    test_name_map = {
+        '0 WK': 'Test 1',
+        '1 WK Repeats': 'Test 2',
+        '2 WK Repeats': 'Test 3', 
+        '3 WK Repeats': 'Test 4'
+    }
+    return test_name_map.get(folder_name, f'Test {folder_name}')
+
 def main():
     """
     Main analysis function
@@ -898,66 +910,71 @@ def main():
     base_path = r"p:\M48 FYP FEA\Compression Data Analysis\FYP-Cyclic-Compression-Data-Analysis"
     
     print("Starting cyclic compression data analysis...")
-    print("Creating output directories...")
     
-    # Create organized output directories
-    output_base = create_output_directories()
-    print(f"Output directories created in: {output_base}")
+    # Define all test weeks to analyze
+    test_weeks = ['0 WK', '1 WK Repeats', '2 WK Repeats', '3 WK Repeats']
     
-    print("Loading Week 0 data...")
-    
-    # Load and analyze week 0 data
-    data_by_combination = analyze_week0_data(base_path)
-    
-    print(f"Found {len(data_by_combination)} Filament-SVF-VS combinations")
-    for combo_key, combo_data in data_by_combination.items():
-        filament, svf, vs = combo_data['filament'], combo_data['svf'], combo_data['vs']
-        filament_name = get_filament_name(filament)
-        has_normal = 'normal' in combo_data and combo_data['normal']
-        has_reprint = 'reprint' in combo_data and combo_data['reprint']
+    for week_folder in test_weeks:
+        test_name = get_test_name(week_folder)
+        print(f"\n{'='*60}")
+        print(f"Analyzing {test_name} ({week_folder})...")
+        print(f"{'='*60}")
         
-        # Show calculated VS values
-        normal_vs = combo_data.get('normal', {}).get('calculated_vs', 'N/A')
-        reprint_vs = combo_data.get('reprint', {}).get('calculated_vs', 'N/A')
+        # Check if folder exists
+        week_path = Path(base_path) / week_folder
+        if not week_path.exists():
+            print(f"Warning: {week_folder} folder not found, skipping...")
+            continue
+            
+        print("Creating output directories...")
         
-        print(f"  {combo_key}: {filament_name}, SVF {svf}%, VS={vs} N/mm (calculated), Normal={has_normal} (VS={normal_vs}), Reprint={has_reprint} (VS={reprint_vs})")
+        # Create organized output directories
+        output_base = create_output_directories(test_name)
+        print(f"Output directories created in: {output_base}")
+        
+        print(f"Loading {week_folder} data...")
+        
+        # Load and analyze week data
+        data_by_combination = analyze_week_data(base_path, week_folder)
+        
+        if not data_by_combination:
+            print(f"No data found in {week_folder}, skipping...")
+            continue
+        
+        print(f"Found {len(data_by_combination)} Filament-SVF-VS combinations")
+        for combo_key, combo_data in data_by_combination.items():
+            filament, svf, vs = combo_data['filament'], combo_data['svf'], combo_data['vs']
+            filament_name = get_filament_name(filament)
+            has_normal = 'normal' in combo_data and combo_data['normal']
+            has_reprint = 'reprint' in combo_data and combo_data['reprint']
+            
+            # Show calculated VS values
+            normal_vs = combo_data.get('normal', {}).get('calculated_vs', 'N/A')
+            reprint_vs = combo_data.get('reprint', {}).get('calculated_vs', 'N/A')
+            
+            print(f"  {combo_key}: {filament_name}, SVF {svf}%, VS={vs} N/mm (calculated), Normal={has_normal} (VS={normal_vs}), Reprint={has_reprint} (VS={reprint_vs})")
+        
+        # Generate the three specific plot types requested
+        print("\nGenerating plots...")
+        
+        print(f"Plot 1: Force vs displacement for specific cycles (1st, 100th, 1000th) - {test_name}...")
+        plot_specific_cycles_force_displacement(data_by_combination, test_name, [1, 100, 1000])
+        
+        print(f"Plot 2: Peak force vs cycle grouped by filament type (same SVF, different TPU types) - {test_name}...")
+        plot_by_filament_type(data_by_combination, test_name)
+        
+        print(f"Plot 3: Peak force vs cycle grouped by SVF percentage (same TPU filament, different SVF) - {test_name}...")
+        plot_by_svf_percentage(data_by_combination, test_name)
+        
+        print(f"\n{test_name} analysis complete! Plots saved in: {output_base}")
+        print(f"Generated plots in:")
+        print(f"  - {test_name} force_displacement_cycles/: Force-displacement cycle plots")
+        print(f"  - {test_name} by_filament_type/: TPU filament comparison plots (same SVF, different filaments)")
+        print(f"  - {test_name} by_svf_percentage/: SVF comparison plots (same TPU filament, different SVFs)")
     
-    # Group similar vertical stiffnesses (within 40 N/mm)
-    print("\nGrouping similar vertical stiffnesses (within 40 N/mm)...")
-    vs_groups = group_similar_vs(data_by_combination, tolerance=40)
-    print(f"Found {len(vs_groups)} VS groups:")
-    for i, group in enumerate(vs_groups):
-        vs_range = f"{min(group)}-{max(group)}" if len(group) > 1 else str(group[0])
-        print(f"  Group {i+1}: {vs_range} N/mm (values: {sorted(group)})")
-    
-    # Generate all plots
-    print("\nGenerating plots...")
-    
-    print("Plot 1: VS groups with different combinations (similar stiffnesses within 40 N/mm)...")
-    plot_vs_groups(data_by_combination, vs_groups)
-    
-    print("Plot 2: Combined average by vertical stiffness (all tests averaged)...")
-    plot_combined_average_by_vs(data_by_combination)
-    
-    print("Plot 3: Force vs displacement for specific cycles (1st, 100th, 1000th)...")
-    plot_specific_cycles_force_displacement(data_by_combination, [1, 100, 1000])
-    
-    print("Plot 4: Peak force vs cycle grouped by filament type (same SVF, different TPU types)...")
-    plot_by_filament_type(data_by_combination)
-    
-    print("Plot 5: Peak force vs cycle grouped by SVF percentage (same TPU filament, different SVF)...")
-    plot_by_svf_percentage(data_by_combination)
-    
-    print("Plot 6: Specific cycles (1st, 100th, 1000th) force comparison by VS groups...")
-    plot_specific_cycles_by_vs_groups(data_by_combination, vs_groups, [1, 100, 1000])
-    
-    print(f"\nAnalysis complete! All plots saved in: {output_base}")
-    print("\nFolder structure:")
-    print("  - Test 1 vertical_stiffness_comparison/: VS groups with different combinations (within 40 N/mm)")
-    print("  - Test 1 force_displacement_cycles/: Force-displacement cycle plots")
-    print("  - Test 1 force_displacement_by_vs_groups/: Separate VS group folders with individual combination curves")
-    print("  - Test 1 by_filament_type/: TPU filament comparison plots (same SVF, different filaments)")
-    print("  - Test 1 by_svf_percentage/: SVF comparison plots (same TPU filament, different SVFs)")
+    print(f"\n{'='*60}")
+    print("All tests analysis complete!")
+    print(f"{'='*60}")
 
 if __name__ == "__main__":
     main()
