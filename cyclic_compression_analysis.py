@@ -974,7 +974,7 @@ def plot_cross_test_peak_force_comparison(base_path):
                     all_peak_forces.extend(peak_forces)
                 
                 if all_cycles:
-                    # Create bins for averaging (similar to existing approach)
+                    # Use exact same binning approach as individual test plots
                     max_cycle = max(all_cycles)
                     bin_edges = np.linspace(1, max_cycle, min(100, max_cycle))
                     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
@@ -992,7 +992,7 @@ def plot_cross_test_peak_force_comparison(base_path):
                     if np.any(valid_mask):
                         ax.plot(bin_centers[valid_mask], np.array(binned_forces)[valid_mask], 
                                '-', color=color, label=f'{test_name}', 
-                               linewidth=3, alpha=0.8, marker='o', markersize=4)
+                               linewidth=3, alpha=0.8)
                         plot_created = True
         
         if plot_created:
