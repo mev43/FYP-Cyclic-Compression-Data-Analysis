@@ -41,10 +41,12 @@ def extract_parameters_from_filename(folder_name):
     Examples: 
     - '20250825 95-35 3DEA1' -> Filament=95, SVF=35
     - '20250909 87-20 REPRINT' -> Filament=87, SVF=20
+    - '20250901 95 20' -> Filament=95, SVF=20
+    - '20250916 87-20 Reprint' -> Filament=87, SVF=20
     """
     parts = folder_name.split()
     if len(parts) >= 2:
-        # Extract Filament-SVF pattern (e.g., '95-35', '87-20')
+        # Handle hyphenated format (e.g., '95-35', '87-20')
         filament_svf = parts[1]
         if '-' in filament_svf:
             filament, svf = filament_svf.split('-')
@@ -52,6 +54,14 @@ def extract_parameters_from_filename(folder_name):
             if svf == '21':
                 svf = '20'
             return int(filament), int(svf)
+        # Handle space-separated format (e.g., '95 20', '87 35')
+        elif len(parts) >= 3 and parts[1].isdigit() and parts[2].isdigit():
+            filament = int(parts[1])
+            svf = int(parts[2])
+            # Fix typo: convert 21 to 20 for consistency
+            if svf == 21:
+                svf = 20
+            return filament, svf
     return None, None
 
 def calculate_vertical_stiffness(df):
@@ -1434,6 +1444,127 @@ def get_test_name(folder_name):
     }
     return test_name_map.get(folder_name, f'Test {folder_name}')
 
+def create_first_cycle_combined_csv(base_path):
+    """
+    Extract first cycle data from all tracking.csv files and create a combined CSV file
+    """
+    print("\nCreating combined first cycle CSV file...")
+    
+    # Define all test weeks
+    test_weeks = ['0 WK', '1 WK Repeats', '2 WK Repeats', '3 WK Repeats']
+    
+    # List to store all first cycle data
+    all_first_cycle_data = []
+    
+    # Process each test week
+    for week_folder in test_weeks:
+        test_name = get_test_name(week_folder)
+        week_path = Path(base_path) / week_folder
+        
+        if not week_path.exists():
+            print(f"  Warning: {week_folder} folder not found, skipping...")
+            continue
+            
+        print(f"  Processing {test_name} ({week_folder})...")
+        
+        # Find all folders in the specified week
+        for folder in week_path.iterdir():
+            if folder.is_dir():
+                filament, svf = extract_parameters_from_filename(folder.name)
+                if filament is not None and svf is not None:
+                    # Determine if this is a reprint or normal test
+                    test_type = "reprint" if "REPRINT" in folder.name.upper() else "normal"
+                    
+                    # Look for tracking CSV file
+                    tracking_file = folder / "Test1" / "Test1.steps.tracking.csv"
+                    if tracking_file.exists():
+                        try:
+                            # Load the CSV file
+                            df = pd.read_csv(tracking_file)
+                            df.columns = df.columns.str.strip()  # Clean column names
+                            
+                            # Filter for first cycle only
+                            first_cycle_data = df[df['Total Cycles'] == 1].copy()
+                            
+                            if not first_cycle_data.empty:
+                                # Add identifying columns
+                                first_cycle_data['Test_Name'] = test_name
+                                first_cycle_data['Week_Folder'] = week_folder
+                                first_cycle_data['Folder_Name'] = folder.name
+                                first_cycle_data['Filament_Type'] = filament
+                                first_cycle_data['SVF_Percentage'] = svf
+                                first_cycle_data['Test_Type'] = test_type
+                                first_cycle_data['Filament_Name'] = get_filament_name(filament)
+                                
+                                # Calculate vertical stiffness for this first cycle
+                                vs_calculated = calculate_vertical_stiffness(first_cycle_data)
+                                first_cycle_data['Calculated_Vertical_Stiffness_N_per_mm'] = vs_calculated
+                                
+                                # Add to the combined list
+                                all_first_cycle_data.append(first_cycle_data)
+                                
+                                print(f"    Added first cycle data from {folder.name} ({len(first_cycle_data)} rows)")
+                            else:
+                                print(f"    Warning: No first cycle data found in {folder.name}")
+                                
+                        except Exception as e:
+                            print(f"    Error processing {tracking_file}: {e}")
+                    else:
+                        print(f"    Warning: Tracking file not found in {folder.name}")
+    
+    # Combine all first cycle data
+    if all_first_cycle_data:
+        combined_df = pd.concat(all_first_cycle_data, ignore_index=True)
+        
+        # Reorder columns to put identifying information first
+        id_columns = ['Test_Name', 'Week_Folder', 'Folder_Name', 'Filament_Name', 'Filament_Type', 
+                     'SVF_Percentage', 'Test_Type', 'Calculated_Vertical_Stiffness_N_per_mm']
+        
+        # Get original data columns
+        original_columns = [col for col in combined_df.columns if col not in id_columns]
+        
+        # Reorder columns
+        final_columns = id_columns + original_columns
+        combined_df = combined_df[final_columns]
+        
+        # Save to CSV
+        output_path = Path(base_path) / 'All_Tests_First_Cycle_Combined_Data.csv'
+        combined_df.to_csv(output_path, index=False)
+        
+        print(f"\n  Combined first cycle CSV created successfully!")
+        print(f"  Output file: {output_path}")
+        print(f"  Total rows: {len(combined_df)}")
+        print(f"  Total columns: {len(combined_df.columns)}")
+        
+        # Print summary statistics
+        print(f"\n  Summary by test:")
+        test_summary = combined_df.groupby(['Test_Name', 'Test_Type']).size().reset_index(name='Row_Count')
+        for _, row in test_summary.iterrows():
+            print(f"    {row['Test_Name']} ({row['Test_Type']}): {row['Row_Count']} rows")
+            
+        print(f"\n  Summary by filament-SVF combination:")
+        combo_summary = combined_df.groupby(['Filament_Name', 'SVF_Percentage']).agg({
+            'Test_Name': 'nunique',
+            'Folder_Name': 'nunique',
+            'Calculated_Vertical_Stiffness_N_per_mm': ['mean', 'std']
+        }).round(2)
+        
+        # Flatten column names
+        combo_summary.columns = ['_'.join(col).strip() if col[1] else col[0] for col in combo_summary.columns]
+        combo_summary = combo_summary.rename(columns={
+            'Test_Name_nunique': 'Tests_Count',
+            'Folder_Name_nunique': 'Samples_Count',
+            'Calculated_Vertical_Stiffness_N_per_mm_mean': 'Avg_VS_N_per_mm',
+            'Calculated_Vertical_Stiffness_N_per_mm_std': 'Std_VS_N_per_mm'
+        })
+        
+        print(combo_summary.to_string())
+        
+        return output_path
+    else:
+        print("  No first cycle data found across all tests!")
+        return None
+
 def main():
     """
     Main analysis function
@@ -1442,6 +1573,12 @@ def main():
     base_path = Path(__file__).parent.resolve()
     
     print("Starting cyclic compression data analysis...")
+    
+    # Create combined first cycle CSV file
+    print(f"\n{'='*60}")
+    print("Creating combined first cycle data CSV...")
+    print(f"{'='*60}")
+    first_cycle_csv_path = create_first_cycle_combined_csv(base_path)
     
     # Define all test weeks to analyze
     test_weeks = ['0 WK', '1 WK Repeats', '2 WK Repeats', '3 WK Repeats']
@@ -1525,11 +1662,34 @@ def main():
     print(f"\n{'='*60}")
     print("ALL ANALYSIS COMPLETE!")
     print("Generated:")
-    print("1. Individual test plots for each test week")
-    print("2. Cross-test peak force comparison plots for each filament-SVF combination")
-    print("3. Cross-test cycle comparison plots showing all combinations for cycles 1, 100, 1000")
-    print("4. Cross-test vertical stiffness comparison plots for similar VS groups (within 40 N/mm)")
+    print("1. Combined first cycle data CSV file (All_Tests_First_Cycle_Combined_Data.csv)")
+    print("2. Individual test plots for each test week")
+    print("3. Cross-test peak force comparison plots for each filament-SVF combination")
+    print("4. Cross-test cycle comparison plots showing all combinations for cycles 1, 100, 1000")
+    print("5. Cross-test vertical stiffness comparison plots for similar VS groups (within 40 N/mm)")
+    if first_cycle_csv_path:
+        print(f"\nFirst cycle combined CSV saved at: {first_cycle_csv_path}")
     print(f"{'='*60}")
 
 if __name__ == "__main__":
-    main()
+    import sys
+    
+    # Check if user wants to create only the first cycle CSV
+    if len(sys.argv) > 1 and sys.argv[1] == '--first-cycle-only':
+        # Set the base path to the directory where this script is located
+        base_path = Path(__file__).parent.resolve()
+        
+        print("Creating combined first cycle CSV file only...")
+        print(f"{'='*60}")
+        first_cycle_csv_path = create_first_cycle_combined_csv(base_path)
+        
+        if first_cycle_csv_path:
+            print(f"{'='*60}")
+            print("FIRST CYCLE CSV CREATION COMPLETE!")
+            print(f"Output file: {first_cycle_csv_path}")
+            print(f"{'='*60}")
+        else:
+            print("Failed to create first cycle CSV file.")
+    else:
+        # Run the full analysis
+        main()
