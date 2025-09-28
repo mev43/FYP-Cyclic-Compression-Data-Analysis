@@ -21,13 +21,13 @@ def create_output_directories():
     """
     Create output directories for organizing plots
     """
-    base_dir = Path('analysis_results')
+    base_dir = Path('Test 1 analysis_results')
     dirs = [
-        base_dir / 'vertical_stiffness_comparison',
-        base_dir / 'force_displacement_cycles',
-        base_dir / 'force_displacement_by_vs_groups',
-        base_dir / 'by_filament_type',
-        base_dir / 'by_svf_percentage'
+        base_dir / 'Test 1 vertical_stiffness_comparison',
+        base_dir / 'Test 1 force_displacement_cycles',
+        base_dir / 'Test 1 force_displacement_by_vs_groups',
+        base_dir / 'Test 1 by_filament_type',
+        base_dir / 'Test 1 by_svf_percentage'
     ]
     
     for dir_path in dirs:
@@ -310,14 +310,14 @@ def plot_vs_groups(data_by_combination, vs_groups):
         # Create title with VS range and combination info
         vs_range = f"{min(vs_group)}-{max(vs_group)}" if len(vs_group) > 1 else str(vs_group[0])
         combo_summary = ", ".join([f"{get_filament_name(f)}-SVF {s}%" for f, s in unique_combinations])
-        ax.set_title(f'Peak Force vs Cycle - Similar Vertical Stiffnesses\nVS Group: {vs_range} N/mm\nCombinations: {combo_summary}')
+        ax.set_title(f'Test 1 Peak Force vs Cycle (Averaged over two sets) - Similar Vertical Stiffnesses\nVS Group: {vs_range} N/mm\nCombinations: {combo_summary}')
         ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
         ax.grid(True, alpha=0.3)
         
         plt.tight_layout()
         
         # Save plot
-        output_path = Path(f'analysis_results/vertical_stiffness_comparison/VS_Group_{group_idx+1}_{vs_range}_Nmm_different_combinations.png')
+        output_path = Path(f'Test 1 analysis_results/Test 1 vertical_stiffness_comparison/Test 1 VS_Group_{group_idx+1}_{vs_range}_Nmm_different_combinations.png')
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close()
         print(f"VS Group {group_idx+1} ({vs_range} N/mm) with different combinations saved as: {output_path}")
@@ -444,7 +444,7 @@ def plot_specific_cycles_force_displacement(data_by_combination, cycles_of_inter
         ax.set_xlabel('Displacement (mm)')
         ax.set_ylabel('Force (kN)')
         filament_name = get_filament_name(filament)
-        ax.set_title(f'Force vs Displacement - {filament_name}, SVF {svf}%\n(Cycles 1, 100, 1000 - Averaged Normal & Reprint)')
+        ax.set_title(f'Test 1 Force vs Displacement (Averaged over two sets) - {filament_name}, SVF {svf}%\n(Cycles 1, 100, 1000)')
         ax.legend()
         ax.grid(True, alpha=0.3)
         
@@ -455,7 +455,7 @@ def plot_specific_cycles_force_displacement(data_by_combination, cycles_of_inter
         
         # Save individual combination plot with Filament and SVF identification
         filament_name_file = get_filament_name(filament)
-        output_path = Path(f'analysis_results/force_displacement_cycles/{filament_name_file}_SVF_{svf}_percent_force_displacement_cycles.png')
+        output_path = Path(f'Test 1 analysis_results/Test 1 force_displacement_cycles/Test 1 {filament_name_file}_SVF_{svf}_percent_force_displacement_cycles.png')
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close()
         print(f"Force-displacement plot for {filament_name}, SVF {svf}% saved as: {output_path}")
@@ -528,14 +528,14 @@ def plot_combined_average_by_vs(data_by_combination):
     
     ax.set_xlabel('Cycle Number')
     ax.set_ylabel('Average Peak Force (kN)')
-    ax.set_title('Combined Average Peak Force vs Cycle by Vertical Stiffness\n(All Normal & Reprint Tests Averaged)')
+    ax.set_title('Test 1 Combined Average Peak Force vs Cycle by Vertical Stiffness\n(All Normal & Reprint Tests Averaged)')
     ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
     ax.grid(True, alpha=0.3)
     
     plt.tight_layout()
     
     # Save plot in appropriate folder
-    output_path = Path('analysis_results/vertical_stiffness_comparison/combined_average_by_vs.png')
+    output_path = Path('Test 1 analysis_results/Test 1 vertical_stiffness_comparison/Test 1 combined_average_by_vs.png')
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
     plt.close()
     print(f"Combined VS average plot saved as: {output_path}")
@@ -611,7 +611,7 @@ def plot_by_filament_type(data_by_combination):
         
         ax.set_xlabel('Cycle Number')
         ax.set_ylabel('Average Peak Force (kN)')
-        ax.set_title(f'Average Peak Force vs Cycle - SVF {svf}%\n(Comparison across Filament Types)')
+        ax.set_title(f'Test 1 Average Peak Force vs Cycle - SVF {svf}%\n(Comparison across Filament Types)')
         ax.legend()
         ax.grid(True, alpha=0.3)
         
@@ -623,7 +623,7 @@ def plot_by_filament_type(data_by_combination):
         plt.tight_layout()
         
         # Save plot
-        output_path = Path(f'analysis_results/by_filament_type/SVF_{svf}_percent_filament_comparison.png')
+        output_path = Path(f'Test 1 analysis_results/Test 1 by_filament_type/Test 1 SVF_{svf}_percent_filament_comparison.png')
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close()
         print(f"Filament comparison plot for SVF {svf}% saved as: {output_path}")
@@ -699,7 +699,7 @@ def plot_by_svf_percentage(data_by_combination):
         ax.set_xlabel('Cycle Number')
         ax.set_ylabel('Average Peak Force (kN)')
         filament_name = get_filament_name(filament)
-        ax.set_title(f'Average Peak Force vs Cycle - {filament_name}\n(Comparison across SVF Percentages)')
+        ax.set_title(f'Test 1 Peak Force vs Cycle (Averaged over two sets) - {filament_name}\n(Comparison across SVF Percentages)')
         ax.legend()
         ax.grid(True, alpha=0.3)
         
@@ -712,7 +712,7 @@ def plot_by_svf_percentage(data_by_combination):
         
         # Save plot
         filament_name_file = get_filament_name(filament)
-        output_path = Path(f'analysis_results/by_svf_percentage/{filament_name_file}_SVF_comparison.png')
+        output_path = Path(f'Test 1 analysis_results/Test 1 by_svf_percentage/Test 1 {filament_name_file}_SVF_comparison.png')
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close()
         print(f"SVF comparison plot for {filament_name} saved as: {output_path}")
@@ -806,7 +806,7 @@ def plot_specific_cycles_by_vs_groups(data_by_combination, vs_groups, target_cyc
         
         # Create VS group folder
         vs_range = f"{min(vs_group)}-{max(vs_group)}" if len(vs_group) > 1 else str(vs_group[0])
-        group_folder = Path(f'analysis_results/force_displacement_by_vs_groups/VS_Group_{group_idx+1}_{vs_range}_Nmm')
+        group_folder = Path(f'Test 1 analysis_results/Test 1 force_displacement_by_vs_groups/Test 1 VS_Group_{group_idx+1}_{vs_range}_Nmm')
         group_folder.mkdir(parents=True, exist_ok=True)
         
         for target_cycle in target_cycles:
@@ -872,7 +872,7 @@ def plot_specific_cycles_by_vs_groups(data_by_combination, vs_groups, target_cyc
                 ax.set_xlabel('Displacement (mm)')
                 ax.set_ylabel('Force (kN)')
                 combo_summary = ", ".join([f"{get_filament_name(f)}-SVF {s}%" for f, s in sorted(unique_combinations)])
-                ax.set_title(f'Force vs Displacement - Cycle {target_cycle}\nVS Group: {vs_range} N/mm\nCombinations: {combo_summary}')
+                ax.set_title(f'Test 1 Force vs Displacement (Averaged over two sets) - Cycle {target_cycle}\nVS Group: {vs_range} N/mm\nCombinations: {combo_summary}')
                 ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
                 ax.grid(True, alpha=0.3)
                 
@@ -882,7 +882,7 @@ def plot_specific_cycles_by_vs_groups(data_by_combination, vs_groups, target_cyc
                 plt.tight_layout()
                 
                 # Save plot in the VS group folder
-                output_path = group_folder / f'Cycle_{target_cycle}_force_displacement.png'
+                output_path = group_folder / f'Test 1 Cycle_{target_cycle}_force_displacement.png'
                 plt.savefig(output_path, dpi=300, bbox_inches='tight')
                 plt.close()
                 print(f"Cycle {target_cycle} force-displacement for VS Group {group_idx+1} ({vs_range} N/mm) saved as: {output_path}")
@@ -953,11 +953,11 @@ def main():
     
     print(f"\nAnalysis complete! All plots saved in: {output_base}")
     print("\nFolder structure:")
-    print("  - vertical_stiffness_comparison/: VS groups with different combinations (within 40 N/mm)")
-    print("  - force_displacement_cycles/: Force-displacement cycle plots")
-    print("  - force_displacement_by_vs_groups/: Separate VS group folders with individual combination curves")
-    print("  - by_filament_type/: TPU filament comparison plots (same SVF, different filaments)")
-    print("  - by_svf_percentage/: SVF comparison plots (same TPU filament, different SVFs)")
+    print("  - Test 1 vertical_stiffness_comparison/: VS groups with different combinations (within 40 N/mm)")
+    print("  - Test 1 force_displacement_cycles/: Force-displacement cycle plots")
+    print("  - Test 1 force_displacement_by_vs_groups/: Separate VS group folders with individual combination curves")
+    print("  - Test 1 by_filament_type/: TPU filament comparison plots (same SVF, different filaments)")
+    print("  - Test 1 by_svf_percentage/: SVF comparison plots (same TPU filament, different SVFs)")
 
 if __name__ == "__main__":
     main()
