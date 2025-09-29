@@ -1605,6 +1605,107 @@ def plot_first_cycle_peak_force_histogram(csv_path):
         print(f"Error creating histogram: {e}")
         return None
 
+def plot_normal_vs_reprint_comparison(data_by_combination, test_name):
+    """
+    Create plots comparing peak force vs cycle between normal and reprint sets for each combination
+    """
+    print(f"\nCreating normal vs reprint comparison plots for {test_name}...")
+    
+    # Create output directory for comparison plots
+    comparison_dir = Path(f'{test_name} analysis_results/{test_name} normal_vs_reprint_comparison')
+    comparison_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Create plots for each filament-SVF combination
+    for combination_key, combo_data in data_by_combination.items():
+        filament, svf, vs = combo_data['filament'], combo_data['svf'], combo_data['vs']
+        filament_name = get_filament_name(filament)
+        
+        # Check if both normal and reprint data exist
+        has_normal = 'normal' in combo_data and combo_data['normal']
+        has_reprint = 'reprint' in combo_data and combo_data['reprint']
+        
+        if not (has_normal and has_reprint):
+            print(f"  Skipping {filament_name} SVF {svf}% - missing normal or reprint data")
+            continue
+        
+        fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+        
+        # Plot normal test data
+        if has_normal:
+            normal_cycles = combo_data['normal']['cycles']
+            normal_forces = combo_data['normal']['peak_forces']
+            # Remove any zero or invalid values and ensure proper data range
+            valid_normal = [(c, f) for c, f in zip(normal_cycles, normal_forces) if f > 0 and not np.isnan(f)]
+            if valid_normal:
+                normal_cycles_clean, normal_forces_clean = zip(*valid_normal)
+                ax.plot(normal_cycles_clean, normal_forces_clean, 'b-o', linewidth=2, markersize=4, 
+                       label='Normal Test', alpha=0.8)
+        
+        # Plot reprint test data
+        if has_reprint:
+            reprint_cycles = combo_data['reprint']['cycles']
+            reprint_forces = combo_data['reprint']['peak_forces']
+            # Remove any zero or invalid values and ensure proper data range
+            valid_reprint = [(c, f) for c, f in zip(reprint_cycles, reprint_forces) if f > 0 and not np.isnan(f)]
+            if valid_reprint:
+                reprint_cycles_clean, reprint_forces_clean = zip(*valid_reprint)
+                ax.plot(reprint_cycles_clean, reprint_forces_clean, 'r-s', linewidth=2, markersize=4, 
+                       label='Reprint Test', alpha=0.8)
+        
+        # Calculate and show statistics
+        if has_normal and has_reprint:
+            # Use cleaned data for statistics
+            normal_forces_clean = [f for c, f in zip(normal_cycles, normal_forces) if f > 0 and not np.isnan(f)]
+            reprint_forces_clean = [f for c, f in zip(reprint_cycles, reprint_forces) if f > 0 and not np.isnan(f)]
+            
+            # Find common cycle range for comparison
+            max_cycles = min(len(normal_forces_clean), len(reprint_forces_clean))
+            if max_cycles > 0:
+                # Calculate average difference over the cycle range
+                common_cycles = min(max_cycles, 100)  # Compare first 100 cycles or available cycles
+                normal_avg = np.mean(normal_forces_clean[:common_cycles])
+                reprint_avg = np.mean(reprint_forces_clean[:common_cycles])
+                difference = abs(normal_avg - reprint_avg)
+                relative_diff = (difference / normal_avg) * 100
+                
+                # Add statistics text box
+                stats_text = f'Average Peak Force (first {common_cycles} cycles):\n'
+                stats_text += f'Normal: {normal_avg:.4f} kN\n'
+                stats_text += f'Reprint: {reprint_avg:.4f} kN\n'
+                stats_text += f'Difference: {difference:.4f} kN ({relative_diff:.2f}%)\n'
+                stats_text += f'Vertical Stiffness: {vs} N/mm'
+                
+                ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, 
+                       bbox=dict(boxstyle='round,pad=0.5', facecolor='lightgray', alpha=0.9),
+                       verticalalignment='top', fontsize=10, fontfamily='monospace')
+        
+        # Formatting
+        ax.set_xlabel('Cycle Number', fontsize=12, fontweight='bold')
+        ax.set_ylabel('Peak Force (kN)', fontsize=12, fontweight='bold')
+        ax.set_title(f'{test_name} Normal vs Reprint Peak Force Comparison\n{filament_name}, SVF {svf}%', 
+                    fontsize=14, fontweight='bold')
+        ax.legend(fontsize=11)
+        ax.grid(True, alpha=0.3)
+        
+        # Add combination annotation
+        ax.text(0.98, 0.02, f'{filament_name}\nSVF {svf}%', transform=ax.transAxes, 
+               bbox=dict(boxstyle='round,pad=0.5', facecolor='lightblue', alpha=0.9),
+               verticalalignment='bottom', horizontalalignment='right', 
+               fontsize=12, fontweight='bold')
+        
+        plt.tight_layout()
+        
+        # Save plot
+        filament_name_file = get_filament_name(filament)
+        output_path = comparison_dir / f'{test_name}_{filament_name_file}_SVF_{svf}_percent_normal_vs_reprint.png'
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        print(f"  Normal vs reprint comparison for {filament_name} SVF {svf}% saved as: {output_path}")
+    
+    print(f"Normal vs reprint comparison plots saved in: {comparison_dir}")
+    return comparison_dir
+
 def plot_first_cycle_vertical_stiffness_histogram(csv_path):
     """
     Create a histogram figure showing each test's vertical stiffness from the first week first cycle CSV,
@@ -1975,11 +2076,18 @@ def main():
         print(f"Plot 3: Peak force vs cycle grouped by SVF percentage (same TPU filament, different SVF) - {test_name}...")
         plot_by_svf_percentage(data_by_combination, test_name)
         
+        # Generate normal vs reprint comparison plots for Test 1 only
+        if test_name == 'Test 1':
+            print(f"Plot 4: Normal vs Reprint peak force comparison - {test_name}...")
+            plot_normal_vs_reprint_comparison(data_by_combination, test_name)
+        
         print(f"\n{test_name} analysis complete! Plots saved in: {output_base}")
         print(f"Generated plots in:")
         print(f"  - {test_name} force_displacement_cycles/: Force-displacement cycle plots")
         print(f"  - {test_name} by_filament_type/: TPU filament comparison plots (same SVF, different filaments)")
         print(f"  - {test_name} by_svf_percentage/: SVF comparison plots (same TPU filament, different SVFs)")
+        if test_name == 'Test 1':
+            print(f"  - {test_name} normal_vs_reprint_comparison/: Normal vs Reprint peak force comparison plots")
     
     print(f"\n{'='*60}")
     print("All individual tests analysis complete!")
