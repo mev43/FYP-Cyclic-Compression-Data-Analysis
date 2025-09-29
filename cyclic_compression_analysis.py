@@ -273,46 +273,46 @@ def group_similar_vs(data_by_combination, tolerance=40):
     
     return vs_groups, averaged_combinations
 
-def plot_vs_groups(data_by_combination, vs_groups):
+def plot_vs_groups_peak_force_comparison(data_by_combination, vs_groups, averaged_combinations, test_name):
     """
     Plot average peak force vs cycle for grouped vertical stiffnesses (within 40 N/mm)
-    Only shows combinations with different filament OR different SVF
+    Now works with averaged vertical stiffness values for the same filament-SVF combinations
+    and creates plots that should go in the vertical_stiffness_comparison folder
     """
+    print(f"\nGenerating VS groups peak force comparison plots for {test_name}...")
+    
     for group_idx, vs_group in enumerate(vs_groups):
-                # Check if this group has different combinations (different filament OR SVF)
+        # Find which averaged combinations belong to this VS group
         combinations_in_group = []
-        for vs in vs_group:
-            for combination_key, combo_data in data_by_combination.items():
-                if combo_data['vs'] == vs:
+        for avg_vs in vs_group:
+            for combo_key, combo_data in averaged_combinations.items():
+                if abs(combo_data['avg_vs'] - avg_vs) < 0.1:  # Small tolerance for floating point comparison
                     filament, svf = combo_data['filament'], combo_data['svf']
-                    combinations_in_group.append((filament, svf, vs))
+                    combinations_in_group.append((filament, svf, avg_vs))
         
-        # Check if we have different combinations (not just same filament-SVF with different VS)
+        # Check if we have different combinations (different filament OR SVF)
         unique_combinations = set((f, s) for f, s, v in combinations_in_group)
         if len(unique_combinations) <= 1:
-            print(f"Skipping VS Group {group_idx+1} - only contains identical filament-SVF combinations")
+            print(f"  Skipping VS Group {group_idx+1} - only contains identical filament-SVF combinations")
             continue
         
-        fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+        fig, ax = plt.subplots(1, 1, figsize=(14, 10))
         
-        colors = plt.cm.Set3(np.linspace(0, 1, len(vs_group)))
+        colors = plt.cm.Set3(np.linspace(0, 1, len(unique_combinations)))
         
-        # Sort VS values in group for consistent plotting
-        vs_group = sorted(vs_group)
+        # Sort combinations for consistent plotting
+        unique_combinations = sorted(unique_combinations)
         
-        for idx, vs in enumerate(vs_group):
+        for idx, (filament, svf) in enumerate(unique_combinations):
             color = colors[idx]
+            filament_name = get_filament_name(filament)
             
-            # Collect all test data for this VS
+            # Find all original combinations that belong to this filament-SVF pair
             all_forces_data = []
-            combinations_info = []
             
+            # Look through original data to find matching combinations
             for combination_key, combo_data in data_by_combination.items():
-                if combo_data['vs'] == vs:
-                    filament, svf = combo_data['filament'], combo_data['svf']
-                    filament_name = get_filament_name(filament)
-                    combinations_info.append(f"{filament_name}-SVF{svf}%")
-                    
+                if combo_data['filament'] == filament and combo_data['svf'] == svf:
                     # Add normal test data
                     if 'normal' in combo_data and combo_data['normal']:
                         cycles = combo_data['normal']['cycles']
@@ -340,9 +340,15 @@ def plot_vs_groups(data_by_combination, vs_groups):
                 avg_forces = np.mean(interpolated_forces, axis=0)
                 std_forces = np.std(interpolated_forces, axis=0) if len(interpolated_forces) > 1 else np.zeros_like(avg_forces)
                 
-                # Create label with combinations info
-                combo_info = ", ".join(set(combinations_info))  # Remove duplicates
-                label = f'VS = {vs} N/mm ({combo_info})'
+                # Get the averaged VS for this combination
+                avg_vs = None
+                for combo_key, combo_data in averaged_combinations.items():
+                    if combo_data['filament'] == filament and combo_data['svf'] == svf:
+                        avg_vs = combo_data['avg_vs']
+                        break
+                
+                # Create label
+                label = f'{filament_name} SVF {svf}% (VS = {avg_vs:.0f} N/mm, n={len(all_forces_data)})'
                 
                 # Plot average with error bands
                 ax.plot(common_cycles, avg_forces, '-', color=color, 
@@ -355,23 +361,32 @@ def plot_vs_groups(data_by_combination, vs_groups):
                                   avg_forces + std_forces/2, 
                                   color=color, alpha=0.2)
         
-        ax.set_xlabel('Cycle Number')
-        ax.set_ylabel('Average Peak Force (kN)')
+        ax.set_xlabel('Cycle Number', fontsize=12, fontweight='bold')
+        ax.set_ylabel('Average Peak Force (kN)', fontsize=12, fontweight='bold')
         
         # Create title with VS range and combination info
-        vs_range = f"{min(vs_group)}-{max(vs_group)}" if len(vs_group) > 1 else str(vs_group[0])
-        combo_summary = ", ".join([f"{get_filament_name(f)}-SVF {s}%" for f, s in unique_combinations])
-        ax.set_title(f'Test 1 Peak Force vs Cycle (Averaged over two sets) - Similar Vertical Stiffnesses\nVS Group: {vs_range} N/mm\nCombinations: {combo_summary}')
+        vs_range = f"{min(vs_group):.0f}-{max(vs_group):.0f}" if len(vs_group) > 1 else f"{vs_group[0]:.0f}"
+        combo_summary = ", ".join([f"{get_filament_name(f)} SVF {s}%" for f, s in unique_combinations])
+        ax.set_title(f'{test_name} Peak Force vs Cycle (Averaged over two sets)\nSimilar Vertical Stiffnesses: VS Group {vs_range} N/mm\nCombinations: {combo_summary}', 
+                    fontsize=14, fontweight='bold')
         ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
         ax.grid(True, alpha=0.3)
         
+        # Add VS group annotation
+        ax.text(0.02, 0.98, f'VS Group {group_idx+1}\n{vs_range} N/mm', 
+               transform=ax.transAxes, 
+               bbox=dict(boxstyle='round,pad=0.5', facecolor='lightblue', alpha=0.9),
+               verticalalignment='top', fontsize=12, fontweight='bold')
+        
         plt.tight_layout()
         
-        # Save plot
-        output_path = Path(f'Test 1 analysis_results/Test 1 vertical_stiffness_comparison/Test 1 VS_Group_{group_idx+1}_{vs_range}_Nmm_different_combinations.png')
+        # Save plot in the vertical_stiffness_comparison folder
+        output_path = Path(f'{test_name} analysis_results/{test_name} vertical_stiffness_comparison/{test_name} VS_Group_{group_idx+1}_{vs_range}_Nmm_peak_force_comparison.png')
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close()
-        print(f"VS Group {group_idx+1} ({vs_range} N/mm) with different combinations saved as: {output_path}")
+        print(f"  VS Group {group_idx+1} ({vs_range} N/mm) peak force comparison saved as: {output_path}")
+    
+    print(f"  Completed VS groups peak force comparison plots for {test_name}")
 
 def plot_specific_cycles_force_displacement(data_by_combination, test_name, cycles_of_interest=[1, 100, 1000]):
     """
@@ -2231,12 +2246,16 @@ def main():
         plot_by_svf_percentage(data_by_combination, test_name)
         
         # Generate VS groups plots for all tests
-        print(f"Plot 4: Force vs displacement by VS groups (similar vertical stiffnesses) - {test_name}...")
+        print(f"Plot 4a: Peak force vs cycle comparison for similar vertical stiffnesses - {test_name}...")
         vs_groups_result = group_similar_vs(data_by_combination, tolerance=40)
         vs_groups, averaged_combinations = vs_groups_result
         if vs_groups:
+            plot_vs_groups_peak_force_comparison(data_by_combination, vs_groups, averaged_combinations, test_name)
+            print(f"Generated {len(vs_groups)} VS groups peak force comparison plots for {test_name}")
+            
+            print(f"Plot 4b: Force vs displacement by VS groups (similar vertical stiffnesses) - {test_name}...")
             plot_specific_cycles_by_vs_groups(data_by_combination, vs_groups, averaged_combinations, test_name, [1, 100, 1000])
-            print(f"Generated {len(vs_groups)} VS groups plots for {test_name}")
+            print(f"Generated {len(vs_groups)} VS groups force-displacement plots for {test_name}")
         else:
             print(f"No VS groups found for {test_name}")
         
@@ -2249,6 +2268,7 @@ def main():
         
         print(f"\n{test_name} analysis complete! Plots saved in: {output_base}")
         print(f"Generated plots in:")
+        print(f"  - {test_name} vertical_stiffness_comparison/: Peak force vs cycle comparison plots for similar vertical stiffnesses")
         print(f"  - {test_name} force_displacement_cycles/: Force-displacement cycle plots")
         print(f"  - {test_name} by_filament_type/: TPU filament comparison plots (same SVF, different filaments)")
         print(f"  - {test_name} by_svf_percentage/: SVF comparison plots (same TPU filament, different SVFs)")
