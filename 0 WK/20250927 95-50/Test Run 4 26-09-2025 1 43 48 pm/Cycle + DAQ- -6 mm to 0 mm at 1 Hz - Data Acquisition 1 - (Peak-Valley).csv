@@ -1,10 +1,4 @@
-﻿"File Path: C:\MTS TestSuite\Data Files\FYPs 2025\FYP-M48\Test Run 4 26-09-2025 1 43 48 pm\Cycle + DAQ- -6 mm to 0 mm at 1 Hz - Data Acquisition 1 - (Peak-Valley).csv   
-Test: FYP-M48_MTS Basic Cyclic
-Test Run: Test Run 4
-Date: 26/09/2025 1:26:32 pm
-
-",,
-CycleCount,Axial Displacement ,Axial Force 
+﻿CycleCount,Axial Displacement ,Axial Force 
 CycleCount,mm,N
 1,-0.842939306,-1022.883545
 1,-2.046708716,-2592.311279

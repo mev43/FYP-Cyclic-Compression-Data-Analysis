@@ -210,35 +210,17 @@ def load_tracking_data(file_path):
             return df
 
         # Otherwise, attempt to parse the new "Peak-Valley" format and map to canonical columns
-        # The new format contains preamble lines, then two header lines:
-        #  - names: CycleCount, Axial Displacement , Axial Force 
-        #  - units: CycleCount, mm, N
-        # We'll locate the true header row and read from there.
-        header_idx = None
-        with open(file_path, 'r', encoding='utf-8-sig', errors='ignore') as f:
-            for i, line in enumerate(f):
-                # Look for the line that contains CycleCount and Axial (without quotes in this format)
-                line_clean = line.strip()
-                if ('CycleCount' in line_clean and 'Axial Displacement' in line_clean and 'Axial Force' in line_clean
-                    and not line_clean.startswith('"') and ',' in line_clean):
-                    header_idx = i
-                    break
-
-        if header_idx is None:
-            # Could not detect new format header; return the original df as a fallback
-            return df
-
-        # Read using detected header row index so pandas uses that line as header
-        # Read the header line manually to get correct column names
-        with open(file_path, 'r', encoding='utf-8-sig', errors='ignore') as f:
-            lines = f.readlines()
-            header_line = lines[header_idx].strip()
-            # Parse CSV header manually
-            import csv
-            header_row = next(csv.reader([header_line]))
+        # Since the header has been removed, the format now starts with:
+        #  - Line 1: CycleCount, Axial Displacement , Axial Force 
+        #  - Line 2: CycleCount, mm, N
+        #  - Line 3+: Data
+        # Simply skip the first 2 rows (header and units) to get to the data
         
-        # Now read the actual data starting after the units row (header_idx + 2)
-        df2 = pd.read_csv(file_path, skiprows=header_idx + 2, names=header_row, encoding='utf-8-sig')
+        # Use the first line as column names
+        column_names = ['CycleCount', 'Axial Displacement', 'Axial Force']
+        
+        # Read the data starting from row 2 (skip first 2 rows: header + units)
+        df2 = pd.read_csv(file_path, skiprows=2, names=column_names, encoding='utf-8-sig')
         
         # Normalize column names by stripping quotes/whitespace
         df2.columns = df2.columns.map(lambda s: s.strip().strip('"') if isinstance(s, str) else s)
