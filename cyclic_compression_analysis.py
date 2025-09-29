@@ -1605,6 +1605,173 @@ def plot_first_cycle_peak_force_histogram(csv_path):
         print(f"Error creating histogram: {e}")
         return None
 
+def plot_first_cycle_vertical_stiffness_histogram(csv_path):
+    """
+    Create a histogram figure showing each test's vertical stiffness from the first week first cycle CSV,
+    with relative standard deviation overlayed for each combination set (normal and reprint)
+    """
+    print("\nCreating first cycle vertical stiffness histogram...")
+    
+    try:
+        # Load the CSV file
+        df = pd.read_csv(csv_path)
+        
+        # Get vertical stiffness data for each combination and test type
+        vs_data = df.groupby(['Filament_Name', 'SVF_Percentage', 'Test_Type'])['Calculated_Vertical_Stiffness_N_per_mm'].first().reset_index()
+        vs_data.columns = ['Filament_Name', 'SVF_Percentage', 'Test_Type', 'Vertical_Stiffness_N_per_mm']
+        
+        # Remove any NaN or invalid stiffness values
+        vs_data = vs_data.dropna(subset=['Vertical_Stiffness_N_per_mm'])
+        vs_data = vs_data[vs_data['Vertical_Stiffness_N_per_mm'] > 0]  # Only positive stiffness values
+        
+        if vs_data.empty:
+            print("No valid vertical stiffness data found for histogram creation.")
+            return None
+        
+        # Calculate statistics for each combination (normal and reprint together)
+        stats_data = []
+        for (filament, svf), group in vs_data.groupby(['Filament_Name', 'SVF_Percentage']):
+            normal_vs = group[group['Test_Type'] == 'normal']['Vertical_Stiffness_N_per_mm'].values
+            reprint_vs = group[group['Test_Type'] == 'reprint']['Vertical_Stiffness_N_per_mm'].values
+            
+            all_vs = []
+            if len(normal_vs) > 0:
+                all_vs.append(normal_vs[0])
+            if len(reprint_vs) > 0:
+                all_vs.append(reprint_vs[0])
+            
+            if len(all_vs) >= 2:  # Both normal and reprint exist
+                mean_vs = np.mean(all_vs)
+                std_vs = np.std(all_vs, ddof=1)
+                rsd = (std_vs / mean_vs) * 100  # Relative standard deviation as percentage
+                
+                stats_data.append({
+                    'Filament_Name': filament,
+                    'SVF_Percentage': svf,
+                    'Mean_Vertical_Stiffness_N_per_mm': mean_vs,
+                    'Std_Vertical_Stiffness_N_per_mm': std_vs,
+                    'RSD_Percent': rsd,
+                    'Normal_VS': normal_vs[0] if len(normal_vs) > 0 else np.nan,
+                    'Reprint_VS': reprint_vs[0] if len(reprint_vs) > 0 else np.nan,
+                    'Count': len(all_vs)
+                })
+        
+        stats_df = pd.DataFrame(stats_data)
+        
+        if stats_df.empty:
+            print("No valid combination data found for vertical stiffness histogram creation.")
+            return None
+        
+        # Create the histogram plot
+        fig, ax1 = plt.subplots(1, 1, figsize=(14, 8))
+        
+        # Prepare data for plotting
+        combinations = []
+        mean_vs_values = []
+        rsd_values = []
+        normal_vs_values = []
+        reprint_vs_values = []
+        
+        for _, row in stats_df.iterrows():
+            combo_label = f"{row['Filament_Name']}\nSVF {row['SVF_Percentage']}%"
+            combinations.append(combo_label)
+            mean_vs_values.append(row['Mean_Vertical_Stiffness_N_per_mm'])
+            rsd_values.append(row['RSD_Percent'])
+            normal_vs_values.append(row['Normal_VS'])
+            reprint_vs_values.append(row['Reprint_VS'])
+        
+        x_pos = np.arange(len(combinations))
+        
+        # Create grouped bar chart for individual test values
+        width = 0.35
+        bars1 = ax1.bar(x_pos - width/2, normal_vs_values, width, label='Normal Test', 
+                       color='lightgreen', alpha=0.8, edgecolor='darkgreen')
+        bars2 = ax1.bar(x_pos + width/2, reprint_vs_values, width, label='Reprint Test', 
+                       color='lightsalmon', alpha=0.8, edgecolor='darkorange')
+        
+        # Add mean values as points
+        ax1.plot(x_pos, mean_vs_values, 'ko', markersize=8, label='Mean Vertical Stiffness', zorder=3)
+        
+        # Add error bars representing standard deviation
+        ax1.errorbar(x_pos, mean_vs_values, yerr=[row['Std_Vertical_Stiffness_N_per_mm'] for _, row in stats_df.iterrows()], 
+                    fmt='none', color='black', capsize=5, capthick=2, zorder=3)
+        
+        # Set up primary y-axis (vertical stiffness)
+        ax1.set_xlabel('Filament-SVF Combinations', fontsize=12, fontweight='bold')
+        ax1.set_ylabel('Vertical Stiffness (N/mm)', fontsize=12, fontweight='bold')
+        ax1.set_title('First Week First Cycle Vertical Stiffness Analysis\nVertical Stiffness by Combination with Individual RSD Calculations', 
+                     fontsize=14, fontweight='bold')
+        ax1.set_xticks(x_pos)
+        ax1.set_xticklabels(combinations, rotation=45, ha='right')
+        ax1.grid(True, alpha=0.3, axis='y')
+        ax1.legend(loc='upper left')
+        
+        # Create secondary y-axis for RSD
+        ax2 = ax1.twinx()
+        
+        # Plot individual RSD chains for each combination (not connected)
+        # Each combination gets its own separate visual indicator
+        colors = plt.cm.Set3(np.linspace(0, 1, len(combinations)))
+        
+        for i, (x, rsd, normal, reprint) in enumerate(zip(x_pos, rsd_values, normal_vs_values, reprint_vs_values)):
+            # Calculate RSD range for visual representation on secondary axis
+            combo_color = colors[i]
+            
+            # Convert VS values to RSD axis scale for visualization
+            # We'll show the individual normal and reprint values as points on the RSD axis
+            # scaled relative to their contribution to the RSD calculation
+            mean_val = (normal + reprint) / 2
+            rsd_normal = ((normal - mean_val) / mean_val) * 100 + rsd  # Offset from RSD center
+            rsd_reprint = ((reprint - mean_val) / mean_val) * 100 + rsd  # Offset from RSD center
+            
+            # Plot the RSD chain for this combination (2 points connected)
+            ax2.plot([x-0.1, x+0.1], [rsd_normal, rsd_reprint], 
+                    color=combo_color, linewidth=2, alpha=0.7, zorder=2)
+            
+            # Plot individual points
+            ax2.plot(x-0.1, rsd_normal, 'o', color=combo_color, markersize=5, 
+                    alpha=0.8, zorder=3, label='_nolegend_')
+            ax2.plot(x+0.1, rsd_reprint, 's', color=combo_color, markersize=5, 
+                    alpha=0.8, zorder=3, label='_nolegend_')
+            
+            # Add RSD value label
+            ax2.annotate(f'{rsd:.1f}%', (x, rsd), textcoords="offset points", 
+                        xytext=(0,15), ha='center', fontsize=9, color='red', fontweight='bold')
+        
+        ax2.set_ylabel('Relative Standard Deviation (%)', fontsize=12, fontweight='bold', color='red')
+        ax2.tick_params(axis='y', labelcolor='red')
+        
+        # Add custom legend for RSD visualization
+        from matplotlib.lines import Line2D
+        rsd_legend_elements = [
+            Line2D([0], [0], color='gray', linewidth=2, alpha=0.7, label='RSD Chain (Normal ↔ Reprint)'),
+            Line2D([0], [0], marker='o', color='gray', linewidth=0, markersize=5, alpha=0.8, label='Normal Test'),
+            Line2D([0], [0], marker='s', color='gray', linewidth=0, markersize=5, alpha=0.8, label='Reprint Test')
+        ]
+        ax2.legend(handles=rsd_legend_elements, loc='upper right')
+        
+        plt.tight_layout()
+        
+        # Save the plot
+        output_path = Path('First_Week_First_Cycle_Vertical_Stiffness_Histogram.png')
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        print(f"First cycle vertical stiffness histogram saved as: {output_path}")
+        
+        # Print summary statistics
+        print(f"\nSummary Statistics:")
+        print(f"Number of combinations analyzed: {len(stats_df)}")
+        print(f"Mean vertical stiffness range: {stats_df['Mean_Vertical_Stiffness_N_per_mm'].min():.1f} - {stats_df['Mean_Vertical_Stiffness_N_per_mm'].max():.1f} N/mm")
+        print(f"RSD range: {stats_df['RSD_Percent'].min():.1f}% - {stats_df['RSD_Percent'].max():.1f}%")
+        print(f"Average RSD: {stats_df['RSD_Percent'].mean():.1f}%")
+        
+        return output_path
+        
+    except Exception as e:
+        print(f"Error creating vertical stiffness histogram: {e}")
+        return None
+
 def create_first_cycle_combined_csv(base_path):
     """
     Extract first cycle data from all tracking.csv files and create a combined CSV file
@@ -1747,6 +1914,11 @@ def main():
         print("Creating first week first cycle peak force histogram...")
         print(f"{'='*60}")
         histogram_path = plot_first_cycle_peak_force_histogram('First_Week_First_Cycle_Combined_Data.csv')
+        
+        print(f"\n{'='*60}")
+        print("Creating first week first cycle vertical stiffness histogram...")
+        print(f"{'='*60}")
+        vs_histogram_path = plot_first_cycle_vertical_stiffness_histogram('First_Week_First_Cycle_Combined_Data.csv')
     
     # Define all test weeks to analyze
     test_weeks = ['0 WK', '1 WK Repeats', '2 WK Repeats', '3 WK Repeats']
