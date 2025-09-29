@@ -210,22 +210,60 @@ def analyze_week_data(base_path, week_folder_name):
 def group_similar_vs(data_by_combination, tolerance=40):
     """
     Group combinations with vertical stiffnesses within tolerance (N/mm) of each other
+    First averages VS values for the same filament-SVF combination, then groups by similarity
     """
-    vs_values = [combo_data['vs'] for combo_data in data_by_combination.values()]
-    vs_values = sorted(set(vs_values))  # Get unique VS values, sorted
+    # First, group by filament-SVF combination and average their VS values
+    combination_vs_averages = {}
+    
+    for combination_key, combo_data in data_by_combination.items():
+        filament = combo_data['filament']
+        svf = combo_data['svf']
+        vs = combo_data['vs']
+        
+        # Create a key based on filament and SVF only (ignore individual VS differences)
+        combo_key = (filament, svf)
+        
+        if combo_key not in combination_vs_averages:
+            combination_vs_averages[combo_key] = []
+        
+        combination_vs_averages[combo_key].append(vs)
+    
+    # Calculate average VS for each filament-SVF combination
+    averaged_combinations = {}
+    for combo_key, vs_values in combination_vs_averages.items():
+        filament, svf = combo_key
+        avg_vs = np.mean(vs_values)
+        
+        # Store the averaged data
+        averaged_combinations[combo_key] = {
+            'filament': filament,
+            'svf': svf,
+            'avg_vs': avg_vs,
+            'original_vs_values': vs_values,
+            'original_combinations': []  # Store original combination keys that contributed to this average
+        }
+        
+        # Find all original combinations that belong to this filament-SVF pair
+        for orig_combination_key, orig_combo_data in data_by_combination.items():
+            if orig_combo_data['filament'] == filament and orig_combo_data['svf'] == svf:
+                averaged_combinations[combo_key]['original_combinations'].append(orig_combination_key)
+    
+    # Now group by similar averaged VS values
+    avg_vs_values = [data['avg_vs'] for data in averaged_combinations.values()]
+    avg_vs_values = sorted(set(avg_vs_values))  # Get unique averaged VS values, sorted
     
     vs_groups = []
     used_vs = set()
     
-    for vs in vs_values:
+    for vs in avg_vs_values:
         if vs in used_vs:
             continue
             
-        # Find all VS values within tolerance
+        # Find all averaged VS values within tolerance
         group = [vs]
         used_vs.add(vs)
         
-        for other_vs in vs_values:
+        for other_vs in avg_vs_values:
             if other_vs != vs and other_vs not in used_vs:
                 if abs(vs - other_vs) <= tolerance:
                     group.append(other_vs)
@@ -233,7 +271,7 @@ def group_similar_vs(data_by_combination, tolerance=40):
         
         vs_groups.append(group)
     
-    return vs_groups
+    return vs_groups, averaged_combinations
 
 def plot_vs_groups(data_by_combination, vs_groups):
     """
@@ -730,12 +768,33 @@ def plot_by_svf_percentage(data_by_combination, test_name):
         plt.close()
         print(f"SVF comparison plot for {filament_name} saved as: {output_path}")
 
-def plot_specific_cycles_by_vs_groups(data_by_combination, vs_groups, target_cycles=[1, 100, 1000]):
+def plot_specific_cycles_by_vs_groups(data_by_combination, vs_groups, averaged_combinations, test_name, target_cycles=[1, 100, 1000]):
     """
     Plot force vs displacement for specific cycles (1st, 100th, 1000th) 
     with separate plots for each VS group and each cycle.
     Each VS group gets its own folder with plots showing individual combination curves.
+    
+    Now uses averaged vertical stiffness values for the same filament-SVF combinations
+    before grouping by similarity, so multiple specimens of the same combination are
+    averaged together before plotting.
     """
+    print(f"\nStarting VS groups plotting for {test_name}...")
+    print(f"Current working directory: {Path.cwd()}")
+    print(f"Number of VS groups: {len(vs_groups)}")
+    
+    # Test base directory creation
+    base_test_dir = Path(f'{test_name} analysis_results')
+    vs_base_dir = base_test_dir / f'{test_name} force_displacement_by_vs_groups'
+    
+    print(f"Base test directory: {base_test_dir.absolute()}")
+    print(f"VS base directory: {vs_base_dir.absolute()}")
+    
+    try:
+        vs_base_dir.mkdir(parents=True, exist_ok=True)
+        print(f"✅ Successfully created base VS directory: {vs_base_dir}")
+    except Exception as e:
+        print(f"❌ Failed to create base VS directory: {e}")
+        return
     def average_hysteresis_loops(displacements_list, forces_list):
         """Helper function to properly average hysteresis loops by preserving temporal order"""
         if not displacements_list or not forces_list:
@@ -805,11 +864,12 @@ def plot_specific_cycles_by_vs_groups(data_by_combination, vs_groups, target_cyc
     for group_idx, vs_group in enumerate(vs_groups):
         # Check if this group has different combinations (different filament OR SVF)
         combinations_in_group = []
-        for vs in vs_group:
-            for combination_key, combo_data in data_by_combination.items():
-                if combo_data['vs'] == vs:
-                    filament, svf = combo_data['filament'], combo_data['svf']
-                    combinations_in_group.append((filament, svf, vs))
+        for avg_vs in vs_group:
+            # Find averaged combinations that match this VS value
+            for combo_key, avg_data in averaged_combinations.items():
+                if abs(avg_data['avg_vs'] - avg_vs) < 0.001:  # Match averaged VS values
+                    filament, svf = combo_key
+                    combinations_in_group.append((filament, svf, avg_vs))
         
         # Check if we have different combinations (not just same filament-SVF with different VS)
         unique_combinations = set((f, s) for f, s, v in combinations_in_group)
@@ -818,9 +878,21 @@ def plot_specific_cycles_by_vs_groups(data_by_combination, vs_groups, target_cyc
             continue
         
         # Create VS group folder
-        vs_range = f"{min(vs_group)}-{max(vs_group)}" if len(vs_group) > 1 else str(vs_group[0])
-        group_folder = Path(f'Test 1 analysis_results/Test 1 force_displacement_by_vs_groups/Test 1 VS_Group_{group_idx+1}_{vs_range}_Nmm')
-        group_folder.mkdir(parents=True, exist_ok=True)
+        vs_range = f"{min(vs_group):.0f}-{max(vs_group):.0f}" if len(vs_group) > 1 else f"{vs_group[0]:.0f}"
+        # Clean up the folder name to avoid any path issues
+        clean_test_name = test_name.replace(" ", "_")
+        folder_name = f'{clean_test_name}_VS_Group_{group_idx+1}_{vs_range}_Nmm'
+        group_folder = Path(f'{test_name} analysis_results') / f'{test_name} force_displacement_by_vs_groups' / folder_name
+        
+        # Ensure the directory exists before trying to save files
+        try:
+            group_folder.mkdir(parents=True, exist_ok=True)
+            print(f"  Created directory: {group_folder}")
+            print(f"  Directory exists: {group_folder.exists()}")
+            print(f"  Current working directory: {Path.cwd()}")
+        except Exception as e:
+            print(f"  Error creating directory {group_folder}: {e}")
+            continue
         
         for target_cycle in target_cycles:
             fig, ax = plt.subplots(1, 1, figsize=(12, 8))
@@ -830,78 +902,95 @@ def plot_specific_cycles_by_vs_groups(data_by_combination, vs_groups, target_cyc
             combination_colors = {combo: colors[i] for i, combo in enumerate(sorted(unique_combinations))}
             
             plot_data_exists = False
-            # Plot each unique combination separately (don't average across different combinations)
-            for vs in vs_group:
-                for combination_key, combo_data in data_by_combination.items():
-                    if combo_data['vs'] == vs:
-                        filament, svf = combo_data['filament'], combo_data['svf']
+            # Plot each unique combination separately (now averaged by filament-SVF)
+            for avg_vs in vs_group:
+                # Find averaged combinations that match this VS value
+                for combo_key, avg_data in averaged_combinations.items():
+                    if abs(avg_data['avg_vs'] - avg_vs) < 0.001:  # Match averaged VS values
+                        filament, svf = combo_key
+                        filament_name = get_filament_name(filament)
                         combo_tuple = (filament, svf)
                         
-                        # Collect force-displacement data for this specific combination and target cycle
-                        all_displacements = []
-                        all_forces = []
-                        
-                        # Get force-displacement data for target cycle from normal test
-                        if 'normal' in combo_data and combo_data['normal'] and 'full_data' in combo_data['normal']:
-                            df_normal = combo_data['normal']['full_data']
-                            cycle_data = df_normal[df_normal['Total Cycles'] == target_cycle]
-                            if not cycle_data.empty:
-                                displacement = cycle_data['Displacement(Linear:Digital Position) (mm)'].values
-                                force = cycle_data['Force(Linear:Load) (kN)'].values
-                                if len(displacement) > 5 and len(force) > 5:  # Ensure sufficient data
-                                    all_displacements.append(displacement)
-                                    all_forces.append(force)
-                        
-                        # Get force-displacement data for target cycle from reprint test
-                        if 'reprint' in combo_data and combo_data['reprint'] and 'full_data' in combo_data['reprint']:
-                            df_reprint = combo_data['reprint']['full_data']
-                            cycle_data = df_reprint[df_reprint['Total Cycles'] == target_cycle]
-                            if not cycle_data.empty:
-                                displacement = cycle_data['Displacement(Linear:Digital Position) (mm)'].values
-                                force = cycle_data['Force(Linear:Load) (kN)'].values
-                                if len(displacement) > 5 and len(force) > 5:  # Ensure sufficient data
-                                    all_displacements.append(displacement)
-                                    all_forces.append(force)
-                        
-                        # Calculate and plot average force-displacement curve for this specific combination
-                        if all_displacements and all_forces:
-                            avg_disp, avg_force = average_hysteresis_loops(all_displacements, all_forces)
+                        if combo_tuple in combination_colors:
+                            color = combination_colors[combo_tuple]
                             
-                            if avg_disp is not None and avg_force is not None:
-                                plot_data_exists = True
-                                
-                                color = combination_colors[combo_tuple]
-                                filament_name = get_filament_name(filament)
-                                label = f'{filament_name}-SVF {svf}% (VS={vs} N/mm)'
-                                
-                                # Plot averaged curve for this specific combination
-                                ax.plot(avg_disp, avg_force, 
-                                       color=color, 
-                                       linewidth=3, alpha=0.8, 
-                                       label=label)
+                            # Collect data from all original combinations that contribute to this average
+                            all_displacements_list = []
+                            all_forces_list = []
+                            
+                            for orig_combination_key in avg_data['original_combinations']:
+                                if orig_combination_key in data_by_combination:
+                                    orig_combo_data = data_by_combination[orig_combination_key]
+                                    
+                                    # Get normal test data
+                                    if 'normal' in orig_combo_data and orig_combo_data['normal'] and 'full_data' in orig_combo_data['normal']:
+                                        normal_df = orig_combo_data['normal']['full_data']
+                                        cycle_data = normal_df[normal_df['Total Cycles'] == target_cycle]
+                                        if not cycle_data.empty:
+                                            all_displacements_list.append(cycle_data['Displacement(Linear:Digital Position) (mm)'].values)
+                                            all_forces_list.append(cycle_data['Force(Linear:Load) (kN)'].values)
+                                    
+                                    # Get reprint test data
+                                    if 'reprint' in orig_combo_data and orig_combo_data['reprint'] and 'full_data' in orig_combo_data['reprint']:
+                                        reprint_df = orig_combo_data['reprint']['full_data']
+                                        cycle_data = reprint_df[reprint_df['Total Cycles'] == target_cycle]
+                                        if not cycle_data.empty:
+                                            all_displacements_list.append(cycle_data['Displacement(Linear:Digital Position) (mm)'].values)
+                                            all_forces_list.append(cycle_data['Force(Linear:Load) (kN)'].values)
+                            
+                            # Calculate and plot average force-displacement curve for this averaged combination
+                            if all_displacements_list and all_forces_list:
+                                avg_result = average_hysteresis_loops(all_displacements_list, all_forces_list)
+                                if avg_result is not None:
+                                    avg_disp, avg_force = avg_result
+                                    
+                                    # Plot the averaged curve
+                                    ax.plot(avg_disp, avg_force, color=color, linewidth=2.5, alpha=0.8,
+                                           label=f'{filament_name} SVF {svf}% (Avg VS: {avg_vs:.0f} N/mm)')
+                                    plot_data_exists = True
             
             # Save plot after processing all combinations for this cycle
             if plot_data_exists:
-                ax.set_xlabel('Displacement (mm)')
-                ax.set_ylabel('Force (kN)')
+                ax.set_xlabel('Displacement (mm)', fontsize=12, fontweight='bold')
+                ax.set_ylabel('Force (kN)', fontsize=12, fontweight='bold')
                 combo_summary = ", ".join([f"{get_filament_name(f)}-SVF {s}%" for f, s in sorted(unique_combinations)])
-                ax.set_title(f'Test 1 Force vs Displacement (Averaged over two sets) - Cycle {target_cycle}\nVS Group: {vs_range} N/mm\nCombinations: {combo_summary}')
-                ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+                ax.set_title(f'{test_name} Force vs Displacement - Cycle {target_cycle}\nVS Group {group_idx+1}: {vs_range} N/mm (Averaged by Filament-SVF)\nCombinations: {combo_summary}', 
+                            fontsize=14, fontweight='bold')
+                ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=10)
                 ax.grid(True, alpha=0.3)
+                ax.set_xlim(-7, 1)  # Show compression range
                 
-                # Set x-axis to show compression (negative values)
-                ax.set_xlim(-7, 1)  # Show from -7mm to +1mm for better visualization
+                # Add group info text box
+                info_text = f'VS Group {group_idx+1}\nRange: {vs_range} N/mm\nCombinations: {len(unique_combinations)}'
+                ax.text(0.02, 0.98, info_text, transform=ax.transAxes, 
+                       bbox=dict(boxstyle='round,pad=0.5', facecolor='lightyellow', alpha=0.9),
+                       verticalalignment='top', fontsize=10, fontweight='bold')
                 
                 plt.tight_layout()
                 
                 # Save plot in the VS group folder
-                output_path = group_folder / f'Test 1 Cycle_{target_cycle}_force_displacement.png'
-                plt.savefig(output_path, dpi=300, bbox_inches='tight')
-                plt.close()
-                print(f"Cycle {target_cycle} force-displacement for VS Group {group_idx+1} ({vs_range} N/mm) saved as: {output_path}")
+                clean_filename = f'{clean_test_name}_VS_Group_{group_idx+1}_Cycle_{target_cycle}_averaged_combinations.png'
+                output_path = group_folder / clean_filename
+                
+                # Ensure the parent directory exists before saving
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                print(f"    Attempting to save to: {output_path}")
+                print(f"    Parent directory exists: {output_path.parent.exists()}")
+                print(f"    Full path: {output_path.absolute()}")
+                
+                try:
+                    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+                    plt.close()
+                    print(f"    ✅ VS Group {group_idx+1} Cycle {target_cycle} (averaged combinations) saved as: {output_path}")
+                except Exception as e:
+                    print(f"    ❌ Error saving plot {output_path}: {e}")
+                    plt.close()
             else:
                 plt.close()
-                print(f"No data found for cycle {target_cycle} in VS Group {group_idx+1} ({vs_range} N/mm)")
+                print(f"    No data found for VS Group {group_idx+1} Cycle {target_cycle}")
+        
+        print(f"  VS Group {group_idx+1} ({vs_range} N/mm) plots saved in: {group_folder}")
 
 def plot_cross_test_peak_force_comparison(base_path):
     """
@@ -1225,213 +1314,6 @@ def plot_cross_test_cycle_comparison(base_path, target_cycles=[1, 100, 1000]):
     print(f"  Cross-test cycle comparison plots saved in: {cycle_comparison_dir}")
     print(f"  Organization: Each cycle has its own subdirectory with separate plots for each filament-SVF combination")
 
-def plot_cross_test_vs_comparison(base_path):
-    """
-    Compare peak force vs cycle curves (averaged over two sets) between similar vertical stiffnesses 
-    (within 40 N/mm) across all tests. Creates plots showing how different VS groups perform 
-    across all test conditions.
-    """
-    print("\nGenerating cross-test vertical stiffness comparison plots...")
-    
-    # Define all test weeks
-    test_weeks = ['0 WK', '1 WK Repeats', '2 WK Repeats', '3 WK Repeats']
-    
-    # Collect data from all tests with vertical stiffness information
-    all_test_data = {}
-    all_vs_values = set()
-    
-    for week_folder in test_weeks:
-        test_name = get_test_name(week_folder)
-        week_path = Path(base_path) / week_folder
-        
-        if week_path.exists():
-            print(f"  Loading data from {test_name} ({week_folder})...")
-            data_by_combination = analyze_week_data(base_path, week_folder)
-            
-            if data_by_combination:
-                all_test_data[test_name] = data_by_combination
-                # Collect all VS values
-                for combo_data in data_by_combination.values():
-                    all_vs_values.add(combo_data['vs'])
-    
-    if not all_test_data:
-        print("  No data found across all tests, skipping cross-test VS comparison...")
-        return
-    
-    # Group similar vertical stiffnesses across all tests (within 40 N/mm tolerance)
-    all_vs_list = sorted(list(all_vs_values))
-    vs_groups = []
-    used_vs = set()
-    
-    for vs in all_vs_list:
-        if vs in used_vs:
-            continue
-            
-        # Find all VS values within 40 N/mm tolerance
-        group = [vs]
-        used_vs.add(vs)
-        
-        for other_vs in all_vs_list:
-            if other_vs != vs and other_vs not in used_vs:
-                if abs(vs - other_vs) <= 40:  # 40 N/mm tolerance
-                    group.append(other_vs)
-                    used_vs.add(other_vs)
-        
-        vs_groups.append(sorted(group))
-    
-    print(f"  Found {len(vs_groups)} vertical stiffness groups across all tests:")
-    for i, group in enumerate(vs_groups):
-        vs_range = f"{min(group)}-{max(group)}" if len(group) > 1 else str(group[0])
-        print(f"    VS Group {i+1}: {vs_range} N/mm ({len(group)} values)")
-    
-    # Create output directory
-    output_dir = Path('Cross Test Comparison analysis_results')
-    vs_comparison_dir = output_dir / 'Cross Test vertical_stiffness_comparison'
-    vs_comparison_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Create plots for each VS group
-    for group_idx, vs_group in enumerate(vs_groups):
-        # Check if this group has different combinations (different filament OR SVF)
-        # Collect all combinations in this VS group across all tests
-        combinations_in_group = []
-        test_combination_count = {}  # Track which tests have which combinations
-        
-        for test_name, test_data in all_test_data.items():
-            test_combination_count[test_name] = []
-            for combo_key, combo_data in test_data.items():
-                if combo_data['vs'] in vs_group:
-                    filament, svf = combo_data['filament'], combo_data['svf']
-                    combinations_in_group.append((filament, svf))
-                    test_combination_count[test_name].append((filament, svf))
-        
-        # Check if we have different combinations (not just same filament-SVF with different VS)
-        unique_combinations = set(combinations_in_group)
-        if len(unique_combinations) <= 1:
-            print(f"  Skipping VS Group {group_idx+1} - only contains identical filament-SVF combinations")
-            continue
-        
-        # Check that we have at least 2 tests with data for this VS group
-        tests_with_data = sum(1 for test_combos in test_combination_count.values() if len(test_combos) > 0)
-        if tests_with_data < 2:
-            print(f"  Skipping VS Group {group_idx+1} - appears in fewer than 2 tests ({tests_with_data} test(s))")
-            continue
-        
-        # Check that we have sufficient combinations across tests
-        total_data_points = len(combinations_in_group)
-        if total_data_points < 4:  # Need at least 4 data points for meaningful comparison
-            print(f"  Skipping VS Group {group_idx+1} - insufficient data points ({total_data_points} total)")
-            continue
-        
-        print(f"  Processing VS Group {group_idx+1} with {len(unique_combinations)} unique combinations across {tests_with_data} tests")
-        for test_name, combos in test_combination_count.items():
-            if combos:
-                combo_names = [f"{get_filament_name(f)}-SVF{s}%" for f, s in set(combos)]
-                print(f"    {test_name}: {', '.join(combo_names)}")
-        
-        fig, ax = plt.subplots(1, 1, figsize=(14, 10))
-        
-        # Colors for different tests
-        test_colors = {'Test 1': 'blue', 'Test 2': 'red', 'Test 3': 'green', 'Test 4': 'orange'}
-        
-        plot_created = False
-        
-        # Plot data for each test and each individual combination
-        line_styles = ['-', '--', '-.', ':']
-        
-        for test_name, test_data in all_test_data.items():
-            test_color = test_colors.get(test_name, 'black')
-            
-            # Plot each combination individually for this test
-            combo_idx = 0
-            for combo_key, combo_data in test_data.items():
-                if combo_data['vs'] in vs_group:
-                    filament, svf = combo_data['filament'], combo_data['svf']
-                    filament_name = get_filament_name(filament)
-                    combo_label = f"{filament_name}-SVF{svf}%"
-                    
-                    # Combine normal and reprint data for this specific combination
-                    all_cycles_for_combo = []
-                    all_forces_for_combo = []
-                    
-                    # Add normal test data
-                    if 'normal' in combo_data and combo_data['normal']:
-                        cycles = combo_data['normal']['cycles']
-                        forces = combo_data['normal']['peak_forces']
-                        all_cycles_for_combo.extend(cycles)
-                        all_forces_for_combo.extend(forces)
-                    
-                    # Add reprint test data  
-                    if 'reprint' in combo_data and combo_data['reprint']:
-                        cycles = combo_data['reprint']['cycles']
-                        forces = combo_data['reprint']['peak_forces']
-                        all_cycles_for_combo.extend(cycles)
-                        all_forces_for_combo.extend(forces)
-                    
-                    if all_cycles_for_combo and all_forces_for_combo:
-                        # Use same binning approach as other functions
-                        max_cycle = max(all_cycles_for_combo)
-                        bin_edges = np.linspace(1, max_cycle, min(100, max_cycle))
-                        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-                        
-                        binned_forces = []
-                        for i in range(len(bin_edges) - 1):
-                            mask = (np.array(all_cycles_for_combo) >= bin_edges[i]) & (np.array(all_cycles_for_combo) < bin_edges[i+1])
-                            if np.any(mask):
-                                binned_forces.append(np.mean(np.array(all_forces_for_combo)[mask]))
-                            else:
-                                binned_forces.append(np.nan)
-                        
-                        # Remove NaN values for plotting
-                        valid_mask = ~np.isnan(binned_forces)
-                        if np.any(valid_mask):
-                            # Use different line styles for different combinations
-                            line_style = line_styles[combo_idx % len(line_styles)]
-                            
-                            # Create label for this specific combination
-                            normal_count = len(combo_data.get('normal', {}).get('cycles', [])) if 'normal' in combo_data else 0
-                            reprint_count = len(combo_data.get('reprint', {}).get('cycles', [])) if 'reprint' in combo_data else 0
-                            set_info = f"N+R" if normal_count > 0 and reprint_count > 0 else ("N" if normal_count > 0 else "R")
-                            
-                            label = f'{test_name} - {combo_label} (VS={combo_data["vs"]:.1f}, {set_info})'
-                            
-                            ax.plot(bin_centers[valid_mask], np.array(binned_forces)[valid_mask], 
-                                   line_style, color=test_color, label=label, 
-                                   linewidth=2, alpha=0.8, marker='o', markersize=3)
-                            plot_created = True
-                            combo_idx += 1
-        
-        if plot_created:
-            ax.set_xlabel('Cycle Number', fontsize=12)
-            ax.set_ylabel('Average Peak Force (kN)', fontsize=12)
-            
-            # Create title with VS range and combination info
-            vs_range = f"{min(vs_group)}-{max(vs_group)}" if len(vs_group) > 1 else str(vs_group[0])
-            combo_summary = ", ".join([f"{get_filament_name(f)}-SVF {s}%" for f, s in sorted(unique_combinations)])
-            ax.set_title(f'Cross-Test Peak Force vs Cycle Comparison (Individual Combinations, Averaged over two sets)\nSimilar Vertical Stiffnesses: {vs_range} N/mm\nCombinations: {combo_summary}', 
-                        fontsize=14)
-            
-            ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=9)
-            ax.grid(True, alpha=0.3)
-            
-            # Add VS group annotation
-            ax.text(0.02, 0.98, f'VS Group {group_idx+1}\n{vs_range} N/mm\n(Individual Lines)', 
-                   transform=ax.transAxes, 
-                   bbox=dict(boxstyle='round,pad=0.5', facecolor='lightgreen', alpha=0.9),
-                   verticalalignment='top', fontsize=11, fontweight='bold')
-            
-            plt.tight_layout()
-            
-            # Save plot
-            output_path = vs_comparison_dir / f'Cross_Test_VS_Group_{group_idx+1}_{vs_range}_Nmm_individual_combinations.png'
-            plt.savefig(output_path, dpi=300, bbox_inches='tight')
-            plt.close()
-            print(f"  Cross-test VS comparison for Group {group_idx+1} ({vs_range} N/mm) saved as: {output_path}")
-        else:
-            plt.close()
-            print(f"  No data found for VS Group {group_idx+1} ({vs_range} N/mm)")
-    
-    print(f"  Cross-test vertical stiffness comparison plots saved in: {vs_comparison_dir}")
-
 def get_test_name(folder_name):
     """
     Convert folder name to test name
@@ -1532,7 +1414,7 @@ def plot_first_cycle_peak_force_histogram(csv_path):
         # Set up primary y-axis (force)
         ax1.set_xlabel('Filament-SVF Combinations', fontsize=12, fontweight='bold')
         ax1.set_ylabel('Peak Force (kN)', fontsize=12, fontweight='bold')
-        ax1.set_title('First Week First Cycle Peak Force Analysis\nPeak Force by Combination with Individual RSD Calculations', 
+        ax1.set_title('Test 1 (First Week) First Cycle Peak Force Analysis\nPeak Force by Combination with Individual RSD Calculations', 
                      fontsize=14, fontweight='bold')
         ax1.set_xticks(x_pos)
         ax1.set_xticklabels(combinations, rotation=45, ha='right')
@@ -1586,11 +1468,11 @@ def plot_first_cycle_peak_force_histogram(csv_path):
         plt.tight_layout()
         
         # Save the plot
-        output_path = Path('First_Week_First_Cycle_Peak_Force_Histogram.png')
+        output_path = Path('Test_1_First_Cycle_Peak_Force_Histogram.png')
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close()
         
-        print(f"First cycle peak force histogram saved as: {output_path}")
+        print(f"Test 1 first cycle peak force histogram saved as: {output_path}")
         
         # Print summary statistics
         print(f"\nSummary Statistics:")
@@ -2092,7 +1974,7 @@ def plot_first_cycle_vertical_stiffness_histogram(csv_path):
         # Set up primary y-axis (vertical stiffness)
         ax1.set_xlabel('Filament-SVF Combinations', fontsize=12, fontweight='bold')
         ax1.set_ylabel('Vertical Stiffness (N/mm)', fontsize=12, fontweight='bold')
-        ax1.set_title('First Week First Cycle Vertical Stiffness Analysis\nVertical Stiffness by Combination with Individual RSD Calculations', 
+        ax1.set_title('Test 1 (First Week) First Cycle Vertical Stiffness Analysis\nVertical Stiffness by Combination with Individual RSD Calculations', 
                      fontsize=14, fontweight='bold')
         ax1.set_xticks(x_pos)
         ax1.set_xticklabels(combinations, rotation=45, ha='right')
@@ -2146,11 +2028,11 @@ def plot_first_cycle_vertical_stiffness_histogram(csv_path):
         plt.tight_layout()
         
         # Save the plot
-        output_path = Path('First_Week_First_Cycle_Vertical_Stiffness_Histogram.png')
+        output_path = Path('Test_1_First_Cycle_Vertical_Stiffness_Histogram.png')
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close()
         
-        print(f"First cycle vertical stiffness histogram saved as: {output_path}")
+        print(f"Test 1 first cycle vertical stiffness histogram saved as: {output_path}")
         
         # Print summary statistics
         print(f"\nSummary Statistics:")
@@ -2165,77 +2047,75 @@ def plot_first_cycle_vertical_stiffness_histogram(csv_path):
         print(f"Error creating vertical stiffness histogram: {e}")
         return None
 
-def create_first_cycle_combined_csv(base_path):
+def create_first_test_first_cycle_csv(base_path):
     """
-    Extract first cycle data from all tracking.csv files and create a combined CSV file
+    Extract first cycle data from Test 1 (0 WK) tracking.csv files and create a CSV file
     """
-    print("\nCreating combined first cycle CSV file...")
+    print("\nCreating First Test First Cycle CSV file...")
     
-    # Define all test weeks
-    test_weeks = ['0 WK', '1 WK Repeats', '2 WK Repeats', '3 WK Repeats']
+    # Only process Test 1 (0 WK)
+    week_folder = '0 WK'
+    test_name = 'Test 1'
     
-    # List to store all first cycle data
-    all_first_cycle_data = []
+    # List to store first cycle data
+    first_cycle_data = []
     
-    # Process each test week
-    for week_folder in test_weeks:
-        test_name = get_test_name(week_folder)
-        week_path = Path(base_path) / week_folder
+    week_path = Path(base_path) / week_folder
+    
+    if not week_path.exists():
+        print(f"  Error: {test_name} folder not found: {week_path}")
+        return None
         
-        if not week_path.exists():
-            print(f"  Warning: {week_folder} folder not found, skipping...")
-            continue
-            
-        print(f"  Processing {test_name} ({week_folder})...")
-        
-        # Find all folders in the specified week
-        for folder in week_path.iterdir():
-            if folder.is_dir():
-                filament, svf = extract_parameters_from_filename(folder.name)
-                if filament is not None and svf is not None:
-                    # Determine if this is a reprint or normal test
-                    test_type = "reprint" if "REPRINT" in folder.name.upper() else "normal"
-                    
-                    # Look for tracking CSV file
-                    tracking_file = folder / "Test1" / "Test1.steps.tracking.csv"
-                    if tracking_file.exists():
-                        try:
-                            # Load the CSV file
-                            df = pd.read_csv(tracking_file)
-                            df.columns = df.columns.str.strip()  # Clean column names
-                            
-                            # Filter for first cycle only
-                            first_cycle_data = df[df['Total Cycles'] == 1].copy()
-                            
-                            if not first_cycle_data.empty:
-                                # Add identifying columns
-                                first_cycle_data['Test_Name'] = test_name
-                                first_cycle_data['Week_Folder'] = week_folder
-                                first_cycle_data['Folder_Name'] = folder.name
-                                first_cycle_data['Filament_Type'] = filament
-                                first_cycle_data['SVF_Percentage'] = svf
-                                first_cycle_data['Test_Type'] = test_type
-                                first_cycle_data['Filament_Name'] = get_filament_name(filament)
-                                
-                                # Calculate vertical stiffness for this first cycle
-                                vs_calculated = calculate_vertical_stiffness(first_cycle_data)
-                                first_cycle_data['Calculated_Vertical_Stiffness_N_per_mm'] = vs_calculated
-                                
-                                # Add to the combined list
-                                all_first_cycle_data.append(first_cycle_data)
-                                
-                                print(f"    Added first cycle data from {folder.name} ({len(first_cycle_data)} rows)")
-                            else:
-                                print(f"    Warning: No first cycle data found in {folder.name}")
-                                
-                        except Exception as e:
-                            print(f"    Error processing {tracking_file}: {e}")
-                    else:
-                        print(f"    Warning: Tracking file not found in {folder.name}")
+    print(f"  Processing {test_name} ({week_folder})...")
     
-    # Combine all first cycle data
-    if all_first_cycle_data:
-        combined_df = pd.concat(all_first_cycle_data, ignore_index=True)
+    # Find all folders in the specified week
+    for folder in week_path.iterdir():
+        if folder.is_dir():
+            filament, svf = extract_parameters_from_filename(folder.name)
+            if filament is not None and svf is not None:
+                # Determine if this is a reprint or normal test
+                test_type = "reprint" if "REPRINT" in folder.name.upper() else "normal"
+                
+                # Look for tracking CSV file
+                tracking_file = folder / "Test1" / "Test1.steps.tracking.csv"
+                if tracking_file.exists():
+                    try:
+                        # Load the CSV file
+                        df = pd.read_csv(tracking_file)
+                        df.columns = df.columns.str.strip()  # Clean column names
+                        
+                        # Filter for first cycle only
+                        first_cycle_df = df[df['Total Cycles'] == 1].copy()
+                        
+                        if not first_cycle_df.empty:
+                            # Add identifying columns
+                            first_cycle_df['Test_Name'] = test_name
+                            first_cycle_df['Week_Folder'] = week_folder
+                            first_cycle_df['Folder_Name'] = folder.name
+                            first_cycle_df['Filament_Type'] = filament
+                            first_cycle_df['SVF_Percentage'] = svf
+                            first_cycle_df['Test_Type'] = test_type
+                            first_cycle_df['Filament_Name'] = get_filament_name(filament)
+                            
+                            # Calculate vertical stiffness for this first cycle
+                            vs_calculated = calculate_vertical_stiffness(first_cycle_df)
+                            first_cycle_df['Calculated_Vertical_Stiffness_N_per_mm'] = vs_calculated
+                            
+                            # Add to the combined list
+                            first_cycle_data.append(first_cycle_df)
+                            
+                            print(f"    Added first cycle data from {folder.name} ({len(first_cycle_df)} rows)")
+                        else:
+                            print(f"    Warning: No first cycle data found in {folder.name}")
+                            
+                    except Exception as e:
+                        print(f"    Error processing {tracking_file}: {e}")
+                else:
+                    print(f"    Warning: Tracking file not found in {folder.name}")
+    
+    # Combine first cycle data from Test 1
+    if first_cycle_data:
+        combined_df = pd.concat(first_cycle_data, ignore_index=True)
         
         # Reorder columns to put identifying information first
         id_columns = ['Test_Name', 'Week_Folder', 'Folder_Name', 'Filament_Name', 'Filament_Type', 
@@ -2249,23 +2129,23 @@ def create_first_cycle_combined_csv(base_path):
         combined_df = combined_df[final_columns]
         
         # Save to CSV
-        output_path = Path(base_path) / 'All_Tests_First_Cycle_Combined_Data.csv'
+        output_path = Path(base_path) / 'First_Test_First_Cycle_Data.csv'
         combined_df.to_csv(output_path, index=False)
         
-        print(f"\n  Combined first cycle CSV created successfully!")
+        print(f"\n  First Test First Cycle CSV created successfully!")
         print(f"  Output file: {output_path}")
         print(f"  Total rows: {len(combined_df)}")
         print(f"  Total columns: {len(combined_df.columns)}")
         
         # Print summary statistics
-        print(f"\n  Summary by test:")
-        test_summary = combined_df.groupby(['Test_Name', 'Test_Type']).size().reset_index(name='Row_Count')
+        print(f"\n  Summary by test type:")
+        test_summary = combined_df.groupby(['Test_Type']).size().reset_index(name='Row_Count')
         for _, row in test_summary.iterrows():
-            print(f"    {row['Test_Name']} ({row['Test_Type']}): {row['Row_Count']} rows")
+            print(f"    {row['Test_Type']}: {row['Row_Count']} rows")
             
         print(f"\n  Summary by filament-SVF combination:")
         combo_summary = combined_df.groupby(['Filament_Name', 'SVF_Percentage']).agg({
-            'Test_Name': 'nunique',
+            'Test_Type': 'nunique',
             'Folder_Name': 'nunique',
             'Calculated_Vertical_Stiffness_N_per_mm': ['mean', 'std']
         }).round(2)
@@ -2273,7 +2153,7 @@ def create_first_cycle_combined_csv(base_path):
         # Flatten column names
         combo_summary.columns = ['_'.join(col).strip() if col[1] else col[0] for col in combo_summary.columns]
         combo_summary = combo_summary.rename(columns={
-            'Test_Name_nunique': 'Tests_Count',
+            'Test_Type_nunique': 'Test_Types_Count',
             'Folder_Name_nunique': 'Samples_Count',
             'Calculated_Vertical_Stiffness_N_per_mm_mean': 'Avg_VS_N_per_mm',
             'Calculated_Vertical_Stiffness_N_per_mm_std': 'Std_VS_N_per_mm'
@@ -2283,7 +2163,7 @@ def create_first_cycle_combined_csv(base_path):
         
         return output_path
     else:
-        print("  No first cycle data found across all tests!")
+        print(f"  No first cycle data found in {test_name}!")
         return None
 
 def main():
@@ -2294,24 +2174,6 @@ def main():
     base_path = Path(__file__).parent.resolve()
     
     print("Starting cyclic compression data analysis...")
-    
-    # Create combined first cycle CSV file
-    print(f"\n{'='*60}")
-    print("Creating combined first cycle data CSV...")
-    print(f"{'='*60}")
-    first_cycle_csv_path = create_first_cycle_combined_csv(base_path)
-    
-    # Create histogram for first week first cycle peak forces if CSV exists
-    if first_cycle_csv_path and Path('First_Week_First_Cycle_Combined_Data.csv').exists():
-        print(f"\n{'='*60}")
-        print("Creating first week first cycle peak force histogram...")
-        print(f"{'='*60}")
-        histogram_path = plot_first_cycle_peak_force_histogram('First_Week_First_Cycle_Combined_Data.csv')
-        
-        print(f"\n{'='*60}")
-        print("Creating first week first cycle vertical stiffness histogram...")
-        print(f"{'='*60}")
-        vs_histogram_path = plot_first_cycle_vertical_stiffness_histogram('First_Week_First_Cycle_Combined_Data.csv')
     
     # Define all test weeks to analyze
     test_weeks = ['0 WK', '1 WK Repeats', '2 WK Repeats', '3 WK Repeats']
@@ -2368,11 +2230,21 @@ def main():
         print(f"Plot 3: Peak force vs cycle grouped by SVF percentage (same TPU filament, different SVF) - {test_name}...")
         plot_by_svf_percentage(data_by_combination, test_name)
         
+        # Generate VS groups plots for all tests
+        print(f"Plot 4: Force vs displacement by VS groups (similar vertical stiffnesses) - {test_name}...")
+        vs_groups_result = group_similar_vs(data_by_combination, tolerance=40)
+        vs_groups, averaged_combinations = vs_groups_result
+        if vs_groups:
+            plot_specific_cycles_by_vs_groups(data_by_combination, vs_groups, averaged_combinations, test_name, [1, 100, 1000])
+            print(f"Generated {len(vs_groups)} VS groups plots for {test_name}")
+        else:
+            print(f"No VS groups found for {test_name}")
+        
         # Generate normal vs reprint comparison plots for Test 1 only
         if test_name == 'Test 1':
-            print(f"Plot 4: Normal vs Reprint peak force comparison - {test_name}...")
+            print(f"Plot 5: Normal vs Reprint peak force comparison - {test_name}...")
             plot_normal_vs_reprint_comparison(data_by_combination, test_name)
-            print(f"Plot 5: Vertical stiffness at specific cycles (1st, 100th, 1000th) - {test_name}...")
+            print(f"Plot 6: Vertical stiffness at specific cycles (1st, 100th, 1000th) - {test_name}...")
             plot_vertical_stiffness_at_specific_cycles(data_by_combination, test_name, [1, 100, 1000])
         
         print(f"\n{test_name} analysis complete! Plots saved in: {output_base}")
@@ -2380,6 +2252,7 @@ def main():
         print(f"  - {test_name} force_displacement_cycles/: Force-displacement cycle plots")
         print(f"  - {test_name} by_filament_type/: TPU filament comparison plots (same SVF, different filaments)")
         print(f"  - {test_name} by_svf_percentage/: SVF comparison plots (same TPU filament, different SVFs)")
+        print(f"  - {test_name} force_displacement_by_vs_groups/: Force-displacement plots grouped by similar vertical stiffness")
         if test_name == 'Test 1':
             print(f"  - {test_name} normal_vs_reprint_comparison/: Normal vs Reprint peak force comparison plots")
             print(f"  - {test_name} vertical_stiffness_at_cycles/: Vertical stiffness at specific cycles (1st, 100th, 1000th)")
@@ -2387,6 +2260,27 @@ def main():
     print(f"\n{'='*60}")
     print("All individual tests analysis complete!")
     print(f"{'='*60}")
+    
+    # Generate First Test First Cycle CSV and histogram plots
+    print(f"\n{'='*60}")
+    print("Creating First Test First Cycle CSV and histogram analysis...")
+    print(f"{'='*60}")
+    
+    # Create the First Test First Cycle CSV
+    csv_path = create_first_test_first_cycle_csv(base_path)
+    
+    if csv_path and csv_path.exists():
+        print(f"\nGenerating histogram plots from: {csv_path}")
+        
+        # Generate peak force histogram
+        plot_first_cycle_peak_force_histogram(csv_path)
+        
+        # Generate vertical stiffness histogram
+        plot_first_cycle_vertical_stiffness_histogram(csv_path)
+        
+        print("\nHistogram analysis complete!")
+    else:
+        print("\nSkipping histogram generation - CSV file not created")
     
     # Generate cross-test comparison plots
     print(f"\n{'='*60}")
@@ -2399,41 +2293,13 @@ def main():
     # Plot specific cycles for every filament-SVF combination across all tests
     plot_cross_test_cycle_comparison(base_path, [1, 100, 1000])
     
-    # Plot vertical stiffness comparison across all tests
-    plot_cross_test_vs_comparison(base_path)
-    
     print(f"\n{'='*60}")
     print("ALL ANALYSIS COMPLETE!")
     print("Generated:")
-    print("1. Combined first cycle data CSV file (All_Tests_First_Cycle_Combined_Data.csv)")
-    print("2. First week first cycle peak force histogram with RSD overlay")
-    print("3. Individual test plots for each test week")
-    print("4. Cross-test peak force comparison plots for each filament-SVF combination")
-    print("5. Cross-test cycle comparison plots showing all combinations for cycles 1, 100, 1000")
-    print("6. Cross-test vertical stiffness comparison plots for similar VS groups (within 40 N/mm)")
-    if first_cycle_csv_path:
-        print(f"\nFirst cycle combined CSV saved at: {first_cycle_csv_path}")
+    print("1. Individual test plots for each test week")
+    print("2. Cross-test peak force comparison plots for each filament-SVF combination")
+    print("3. Cross-test cycle comparison plots showing all combinations for cycles 1, 100, 1000")
     print(f"{'='*60}")
 
 if __name__ == "__main__":
-    import sys
-    
-    # Check if user wants to create only the first cycle CSV
-    if len(sys.argv) > 1 and sys.argv[1] == '--first-cycle-only':
-        # Set the base path to the directory where this script is located
-        base_path = Path(__file__).parent.resolve()
-        
-        print("Creating combined first cycle CSV file only...")
-        print(f"{'='*60}")
-        first_cycle_csv_path = create_first_cycle_combined_csv(base_path)
-        
-        if first_cycle_csv_path:
-            print(f"{'='*60}")
-            print("FIRST CYCLE CSV CREATION COMPLETE!")
-            print(f"Output file: {first_cycle_csv_path}")
-            print(f"{'='*60}")
-        else:
-            print("Failed to create first cycle CSV file.")
-    else:
-        # Run the full analysis
-        main()
+    main()
