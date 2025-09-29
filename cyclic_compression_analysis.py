@@ -67,6 +67,7 @@ def extract_parameters_from_filename(folder_name):
 def calculate_vertical_stiffness(df):
     """
     Calculate vertical stiffness from the first cycle force-displacement data
+    Works with both legacy format (many points per cycle) and Peak-Valley format (fewer points per cycle)
     Vertical stiffness = slope of force vs displacement during loading phase
     """
     try:
@@ -80,8 +81,15 @@ def calculate_vertical_stiffness(df):
         force = first_cycle_data['Force(Linear:Load) (kN)'].values
         displacement = first_cycle_data['Displacement(Linear:Digital Position) (mm)'].values
         
-        if len(force) < 10 or len(displacement) < 10:  # Need sufficient data points
+        # Check if we have sufficient data points for calculation
+        # Use a very low threshold to handle Peak-Valley format
+        min_points = 3  # Reduced to minimum viable points for a slope calculation
+        
+        if len(force) < min_points or len(displacement) < min_points:
+            print(f"  Insufficient data points ({len(force)}) in cycle 1 for VS calculation (need at least {min_points})")
             return None
+        
+        print(f"  Using {len(force)} data points from cycle 1 for VS calculation")
         
         # Sort data by displacement to ensure proper ordering
         sort_indices = np.argsort(displacement)
@@ -102,7 +110,8 @@ def calculate_vertical_stiffness(df):
         force_loading = force_sorted[min_disp_idx:max_force_idx]
         
         # Remove any data points with zero or very small displacement changes
-        if len(disp_loading) >= 5:
+        # Use a smaller minimum for Peak-Valley format
+        if len(disp_loading) >= 3:
             disp_range = np.max(disp_loading) - np.min(disp_loading)
             
             if disp_range > 0.001:  # Minimum displacement range threshold
@@ -117,6 +126,44 @@ def calculate_vertical_stiffness(df):
                     vertical_stiffness = abs(slope) * 1000
                     return vertical_stiffness
         
+        # Fallback: try to detect a loading segment in original order (displacement decreasing)
+        try:
+            disp_seq = first_cycle_data['Displacement(Linear:Digital Position) (mm)'].values
+            force_seq = first_cycle_data['Force(Linear:Load) (kN)'].values
+            if len(disp_seq) >= 10:
+                diffs = np.diff(disp_seq)
+                # Identify indices where displacement decreases (compression loading)
+                loading_flags = diffs < 0
+                # Find longest contiguous loading segment
+                best_start, best_len = None, 0
+                cur_start, cur_len = None, 0
+                for i, flag in enumerate(loading_flags):
+                    if flag:
+                        if cur_start is None:
+                            cur_start = i
+                            cur_len = 2  # include i and i+1 points
+                        else:
+                            cur_len += 1
+                    else:
+                        if cur_start is not None and cur_len > best_len:
+                            best_start, best_len = cur_start, cur_len
+                        cur_start, cur_len = None, 0
+                # Check last run
+                if cur_start is not None and cur_len > best_len:
+                    best_start, best_len = cur_start, cur_len
+
+                if best_start is not None and best_len >= 5:
+                    seg_slice = slice(best_start, best_start + best_len)
+                    disp_seg = disp_seq[seg_slice]
+                    force_seg = force_seq[seg_slice]
+                    # Guard against tiny ranges
+                    if (np.max(disp_seg) - np.min(disp_seg)) > 0.001:
+                        slope, intercept, r_value, p_value, std_err = stats.linregress(disp_seg, force_seg)
+                        if r_value**2 > 0.3 and abs(slope) > 0.001:
+                            return abs(slope) * 1000
+        except Exception:
+            pass
+
         return None
         
     except Exception as e:
@@ -149,13 +196,175 @@ def load_tracking_data(file_path):
     Load tracking CSV file and return DataFrame
     """
     try:
+        # First try to read directly (legacy Test1.steps.tracking.csv)
         df = pd.read_csv(file_path)
-        # Clean column names by stripping whitespace
         df.columns = df.columns.str.strip()
-        return df
+
+        # If the expected legacy columns exist, return as-is
+        legacy_cols = {
+            'Total Cycles',
+            'Displacement(Linear:Digital Position) (mm)',
+            'Force(Linear:Load) (kN)'
+        }
+        if legacy_cols.issubset(set(df.columns)):
+            return df
+
+        # Otherwise, attempt to parse the new "Peak-Valley" format and map to canonical columns
+        # The new format contains preamble lines, then two header lines:
+        #  - names: CycleCount, Axial Count , Axial Displacement , Axial Force 
+        #  - units: cycles, mm, N
+        # We'll locate the true header row and read from there.
+        header_idx = None
+        with open(file_path, 'r', encoding='utf-8-sig', errors='ignore') as f:
+            for i, line in enumerate(f):
+                # Look for the line that contains quoted column names (handle trailing spaces)
+                if ('"CycleCount"' in line and 'Axial Displacement' in line and 'Axial Force' in line):
+                    header_idx = i
+                    break
+
+        if header_idx is None:
+            # Could not detect new format header; return the original df as a fallback
+            return df
+
+        # Read using detected header row index so pandas uses that line as header
+        # Read the header line manually to get correct column names
+        with open(file_path, 'r', encoding='utf-8-sig', errors='ignore') as f:
+            lines = f.readlines()
+            header_line = lines[header_idx].strip()
+            # Parse CSV header manually
+            import csv
+            header_row = next(csv.reader([header_line]))
+        
+        # Now read the actual data starting after the units row (header_idx + 2)
+        df2 = pd.read_csv(file_path, skiprows=header_idx + 2, names=header_row, encoding='utf-8-sig')
+        
+        # Normalize column names by stripping quotes/whitespace
+        df2.columns = df2.columns.map(lambda s: s.strip().strip('"') if isinstance(s, str) else s)
+
+        # Build a robust alias map for expected columns
+        def _norm(s: str) -> str:
+            s = s.strip().strip('"').lower().replace('\t', ' ')
+            s = ' '.join(s.split())  # collapse internal whitespace
+            return s
+
+        colmap = { _norm(c): c for c in df2.columns if isinstance(c, str) }
+
+        def _find_col(candidates):
+            # try exact normalized match first
+            for key in candidates:
+                if key in colmap:
+                    return colmap[key]
+            # then try substring containment (more permissive)
+            for k, orig in colmap.items():
+                for key in candidates:
+                    if key in k:
+                        return orig
+            return None
+
+        cycle_col = _find_col(['cyclecount'])
+        disp_col = _find_col(['axial displacement', 'displacement'])
+        force_col = _find_col(['axial force', 'force'])
+
+        if not all([cycle_col, disp_col, force_col]):
+            raise ValueError(f"Required columns not found. Available: {list(df2.columns)}")
+
+        # Drop the units row if present by coercing to numeric and dropping NaNs
+        for col in [cycle_col, disp_col, force_col]:
+            df2[col] = pd.to_numeric(df2[col], errors='coerce')
+
+        df2 = df2.dropna(subset=[cycle_col, disp_col, force_col])
+
+        # Map to canonical column names and units
+        mapped = pd.DataFrame({
+            'Total Cycles': df2[cycle_col].astype(int),
+            'Displacement(Linear:Digital Position) (mm)': df2[disp_col].astype(float),
+            'Force(Linear:Load) (kN)': (df2[force_col].astype(float)) / 1000.0
+        })
+
+        return mapped
     except Exception as e:
         print(f"Error loading {file_path}: {e}")
         return None
+
+def find_tracking_csv(folder_path: Path) -> Path | None:
+    """
+    Find a tracking CSV file within a specimen folder.
+    Preference order:
+      1) Legacy path: Test1/Test1.steps.tracking.csv
+      2) Any CSV containing 'Peak-Valley' in the name (recursively), most recent file if multiple
+      3) Any '*.steps.tracking.csv' found recursively
+    Returns the Path or None if not found.
+    """
+    # 1) Preferred legacy location
+    legacy = folder_path / 'Test1' / 'Test1.steps.tracking.csv'
+    if legacy.exists():
+        return legacy
+
+    # 2) New Peak-Valley format (recursively search)
+    peak_valley_candidates = []
+    try:
+        for p in folder_path.rglob('*.csv'):
+            name_lower = p.name.lower()
+            if 'peak-valley' in name_lower:
+                peak_valley_candidates.append(p)
+    except Exception:
+        peak_valley_candidates = []
+
+    if peak_valley_candidates:
+        # Pick the most recent modified file to be safe
+        try:
+            peak_valley_candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        except Exception:
+            pass
+        return peak_valley_candidates[0]
+
+    # 3) Any steps.tracking.csv found recursively
+    tracking_candidates = []
+    try:
+        for p in folder_path.rglob('*.steps.tracking.csv'):
+            tracking_candidates.append(p)
+    except Exception:
+        tracking_candidates = []
+
+    if tracking_candidates:
+        try:
+            tracking_candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        except Exception:
+            pass
+        return tracking_candidates[0]
+
+    # 4) Any CSV that appears to be Peak-Valley by content (header contains quoted CycleCount & Axial Displacement & Axial Force)
+    try:
+        content_candidates = []
+        for p in folder_path.rglob('*.csv'):
+            try:
+                with open(p, 'r', encoding='utf-8-sig', errors='ignore') as f:
+                    # Read a small chunk to inspect header area
+                    preview = ''.join([next(f) for _ in range(12)])
+                # Look for quoted column names (handle trailing spaces)
+                if ('"CycleCount"' in preview and 'Axial Displacement' in preview and 'Axial Force' in preview):
+                    content_candidates.append(p)
+            except StopIteration:
+                # Very short file; still check what we have
+                try:
+                    with open(p, 'r', encoding='utf-8-sig', errors='ignore') as f:
+                        preview = f.read(512)
+                    if ('"CycleCount"' in preview and 'Axial Displacement' in preview and 'Axial Force' in preview):
+                        content_candidates.append(p)
+                except Exception:
+                    continue
+            except Exception:
+                continue
+        if content_candidates:
+            try:
+                content_candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+            except Exception:
+                pass
+            return content_candidates[0]
+    except Exception:
+        pass
+
+    return None
 
 def analyze_week_data(base_path, week_folder_name):
     """
@@ -175,9 +384,10 @@ def analyze_week_data(base_path, week_folder_name):
                 # Determine if this is a reprint or normal test
                 test_type = "reprint" if "REPRINT" in folder.name.upper() else "normal"
                 
-                # Look for tracking CSV file
-                tracking_file = folder / "Test1" / "Test1.steps.tracking.csv"
-                if tracking_file.exists():
+                # Locate tracking CSV file (supports legacy and new Peak-Valley formats)
+                tracking_file = find_tracking_csv(folder)
+                if tracking_file and tracking_file.exists():
+                    print(f"  Using tracking file for {folder.name}: {tracking_file.relative_to(Path(base_path)) if str(tracking_file).startswith(str(base_path)) else tracking_file}")
                     df = load_tracking_data(tracking_file)
                     if df is not None:
                         cycles, peak_forces = find_peak_force_per_cycle(df)
@@ -2091,13 +2301,12 @@ def create_first_test_first_cycle_csv(base_path):
                 # Determine if this is a reprint or normal test
                 test_type = "reprint" if "REPRINT" in folder.name.upper() else "normal"
                 
-                # Look for tracking CSV file
-                tracking_file = folder / "Test1" / "Test1.steps.tracking.csv"
-                if tracking_file.exists():
+                # Locate tracking CSV file (supports legacy and new Peak-Valley formats)
+                tracking_file = find_tracking_csv(folder)
+                if tracking_file and tracking_file.exists():
                     try:
-                        # Load the CSV file
-                        df = pd.read_csv(tracking_file)
-                        df.columns = df.columns.str.strip()  # Clean column names
+                        # Load the CSV file via common loader to normalize schema
+                        df = load_tracking_data(tracking_file)
                         
                         # Filter for first cycle only
                         first_cycle_df = df[df['Total Cycles'] == 1].copy()
