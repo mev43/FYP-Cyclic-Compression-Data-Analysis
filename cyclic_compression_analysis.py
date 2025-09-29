@@ -211,14 +211,16 @@ def load_tracking_data(file_path):
 
         # Otherwise, attempt to parse the new "Peak-Valley" format and map to canonical columns
         # The new format contains preamble lines, then two header lines:
-        #  - names: CycleCount, Axial Count , Axial Displacement , Axial Force 
-        #  - units: cycles, mm, N
+        #  - names: CycleCount, Axial Displacement , Axial Force 
+        #  - units: CycleCount, mm, N
         # We'll locate the true header row and read from there.
         header_idx = None
         with open(file_path, 'r', encoding='utf-8-sig', errors='ignore') as f:
             for i, line in enumerate(f):
-                # Look for the line that contains quoted column names (handle trailing spaces)
-                if ('"CycleCount"' in line and 'Axial Displacement' in line and 'Axial Force' in line):
+                # Look for the line that contains CycleCount and Axial (without quotes in this format)
+                line_clean = line.strip()
+                if ('CycleCount' in line_clean and 'Axial Displacement' in line_clean and 'Axial Force' in line_clean
+                    and not line_clean.startswith('"') and ',' in line_clean):
                     header_idx = i
                     break
 
@@ -1834,7 +1836,10 @@ def plot_vertical_stiffness_at_specific_cycles(data_by_combination, test_name, t
             force = cycle_data['Force(Linear:Load) (kN)'].values
             displacement = cycle_data['Displacement(Linear:Digital Position) (mm)'].values
             
-            if len(force) < 10 or len(displacement) < 10:
+            # Use the same reduced threshold as the main calculate_vertical_stiffness function
+            # to handle Peak-Valley format (3 points minimum instead of 10)
+            min_points = 3
+            if len(force) < min_points or len(displacement) < min_points:
                 return None
             
             # Sort data by displacement
@@ -1842,19 +1847,28 @@ def plot_vertical_stiffness_at_specific_cycles(data_by_combination, test_name, t
             displacement_sorted = displacement[sort_indices]
             force_sorted = force[sort_indices]
             
-            # Find loading region (first 60% of data or up to max force)
-            max_force_idx = min(np.argmax(np.abs(force_sorted)), int(len(force_sorted) * 0.6))
-            if max_force_idx < len(force_sorted) * 0.2:
-                max_force_idx = int(len(force_sorted) * 0.6)
+            # Find loading region - for smaller datasets, use a larger portion
+            if len(force_sorted) >= 10:
+                # For larger datasets, use original logic
+                max_force_idx = min(np.argmax(np.abs(force_sorted)), int(len(force_sorted) * 0.6))
+                if max_force_idx < len(force_sorted) * 0.2:
+                    max_force_idx = int(len(force_sorted) * 0.6)
+            else:
+                # For smaller datasets (Peak-Valley format), use most of the data
+                max_force_idx = max(int(len(force_sorted) * 0.8), len(force_sorted) - 1)
             
             disp_loading = displacement_sorted[:max_force_idx]
             force_loading = force_sorted[:max_force_idx]
             
-            if len(disp_loading) >= 5:
+            # Reduce minimum points required for regression to handle Peak-Valley format
+            min_regression_points = 3
+            if len(disp_loading) >= min_regression_points:
                 disp_range = np.max(disp_loading) - np.min(disp_loading)
                 if disp_range > 0.001:
                     slope, intercept, r_value, p_value, std_err = stats.linregress(disp_loading, force_loading)
-                    if r_value**2 > 0.3 and abs(slope) > 0.001:
+                    # Relax R-squared requirement for smaller datasets
+                    min_r_squared = 0.3 if len(disp_loading) >= 5 else 0.1
+                    if r_value**2 > min_r_squared and abs(slope) > 0.001:
                         return abs(slope) * 1000  # Convert to N/mm
             
             return None
