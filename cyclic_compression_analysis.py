@@ -1444,6 +1444,167 @@ def get_test_name(folder_name):
     }
     return test_name_map.get(folder_name, f'Test {folder_name}')
 
+def plot_first_cycle_peak_force_histogram(csv_path):
+    """
+    Create a histogram figure showing each test's peak force for cycle 1 from the first week first cycle CSV,
+    with relative standard deviation overlayed for each combination set (normal and reprint)
+    """
+    print("\nCreating first cycle peak force histogram...")
+    
+    try:
+        # Load the CSV file
+        df = pd.read_csv(csv_path)
+        
+        # Calculate peak force (absolute value) for each combination and test type
+        peak_data = df.groupby(['Filament_Name', 'SVF_Percentage', 'Test_Type'])['Force(Linear:Load) (kN)'].apply(
+            lambda x: np.max(np.abs(x))
+        ).reset_index()
+        peak_data.columns = ['Filament_Name', 'SVF_Percentage', 'Test_Type', 'Peak_Force_kN']
+        
+        # Calculate statistics for each combination (normal and reprint together)
+        stats_data = []
+        for (filament, svf), group in peak_data.groupby(['Filament_Name', 'SVF_Percentage']):
+            normal_peak = group[group['Test_Type'] == 'normal']['Peak_Force_kN'].values
+            reprint_peak = group[group['Test_Type'] == 'reprint']['Peak_Force_kN'].values
+            
+            all_peaks = []
+            if len(normal_peak) > 0:
+                all_peaks.append(normal_peak[0])
+            if len(reprint_peak) > 0:
+                all_peaks.append(reprint_peak[0])
+            
+            if len(all_peaks) >= 2:  # Both normal and reprint exist
+                mean_peak = np.mean(all_peaks)
+                std_peak = np.std(all_peaks, ddof=1)
+                rsd = (std_peak / mean_peak) * 100  # Relative standard deviation as percentage
+                
+                stats_data.append({
+                    'Filament_Name': filament,
+                    'SVF_Percentage': svf,
+                    'Mean_Peak_Force_kN': mean_peak,
+                    'Std_Peak_Force_kN': std_peak,
+                    'RSD_Percent': rsd,
+                    'Normal_Peak': normal_peak[0] if len(normal_peak) > 0 else np.nan,
+                    'Reprint_Peak': reprint_peak[0] if len(reprint_peak) > 0 else np.nan,
+                    'Count': len(all_peaks)
+                })
+        
+        stats_df = pd.DataFrame(stats_data)
+        
+        if stats_df.empty:
+            print("No data found for histogram creation.")
+            return None
+        
+        # Create the histogram plot
+        fig, ax1 = plt.subplots(1, 1, figsize=(14, 8))
+        
+        # Prepare data for plotting
+        combinations = []
+        mean_forces = []
+        rsd_values = []
+        normal_forces = []
+        reprint_forces = []
+        
+        for _, row in stats_df.iterrows():
+            combo_label = f"{row['Filament_Name']}\nSVF {row['SVF_Percentage']}%"
+            combinations.append(combo_label)
+            mean_forces.append(row['Mean_Peak_Force_kN'])
+            rsd_values.append(row['RSD_Percent'])
+            normal_forces.append(row['Normal_Peak'])
+            reprint_forces.append(row['Reprint_Peak'])
+        
+        x_pos = np.arange(len(combinations))
+        
+        # Create grouped bar chart for individual test values
+        width = 0.35
+        bars1 = ax1.bar(x_pos - width/2, normal_forces, width, label='Normal Test', 
+                       color='lightblue', alpha=0.8, edgecolor='darkblue')
+        bars2 = ax1.bar(x_pos + width/2, reprint_forces, width, label='Reprint Test', 
+                       color='lightcoral', alpha=0.8, edgecolor='darkred')
+        
+        # Add mean values as points
+        ax1.plot(x_pos, mean_forces, 'ko', markersize=8, label='Mean Peak Force', zorder=3)
+        
+        # Add error bars representing standard deviation
+        ax1.errorbar(x_pos, mean_forces, yerr=[row['Std_Peak_Force_kN'] for _, row in stats_df.iterrows()], 
+                    fmt='none', color='black', capsize=5, capthick=2, zorder=3)
+        
+        # Set up primary y-axis (force)
+        ax1.set_xlabel('Filament-SVF Combinations', fontsize=12, fontweight='bold')
+        ax1.set_ylabel('Peak Force (kN)', fontsize=12, fontweight='bold')
+        ax1.set_title('First Week First Cycle Peak Force Analysis\nPeak Force by Combination with Individual RSD Calculations', 
+                     fontsize=14, fontweight='bold')
+        ax1.set_xticks(x_pos)
+        ax1.set_xticklabels(combinations, rotation=45, ha='right')
+        ax1.grid(True, alpha=0.3, axis='y')
+        ax1.legend(loc='upper left')
+        
+        # Create secondary y-axis for RSD
+        ax2 = ax1.twinx()
+        
+        # Plot individual RSD chains for each combination (not connected)
+        # Each combination gets its own separate visual indicator
+        colors = plt.cm.Set3(np.linspace(0, 1, len(combinations)))
+        
+        for i, (x, rsd, normal, reprint) in enumerate(zip(x_pos, rsd_values, normal_forces, reprint_forces)):
+            # Calculate RSD range for visual representation on secondary axis
+            combo_color = colors[i]
+            
+            # Convert force values to RSD axis scale for visualization
+            # We'll show the individual normal and reprint values as points on the RSD axis
+            # scaled relative to their contribution to the RSD calculation
+            mean_val = (normal + reprint) / 2
+            rsd_normal = ((normal - mean_val) / mean_val) * 100 + rsd  # Offset from RSD center
+            rsd_reprint = ((reprint - mean_val) / mean_val) * 100 + rsd  # Offset from RSD center
+            
+            # Plot the RSD chain for this combination (2 points connected)
+            ax2.plot([x-0.1, x+0.1], [rsd_normal, rsd_reprint], 
+                    color=combo_color, linewidth=2, alpha=0.7, zorder=2)
+            
+            # Plot individual points
+            ax2.plot(x-0.1, rsd_normal, 'o', color=combo_color, markersize=5, 
+                    alpha=0.8, zorder=3, label='_nolegend_')
+            ax2.plot(x+0.1, rsd_reprint, 's', color=combo_color, markersize=5, 
+                    alpha=0.8, zorder=3, label='_nolegend_')
+            
+            # Add RSD value label
+            ax2.annotate(f'{rsd:.1f}%', (x, rsd), textcoords="offset points", 
+                        xytext=(0,15), ha='center', fontsize=9, color='red', fontweight='bold')
+        
+        ax2.set_ylabel('Relative Standard Deviation (%)', fontsize=12, fontweight='bold', color='red')
+        ax2.tick_params(axis='y', labelcolor='red')
+        
+        # Add custom legend for RSD visualization
+        from matplotlib.lines import Line2D
+        rsd_legend_elements = [
+            Line2D([0], [0], color='gray', linewidth=2, alpha=0.7, label='RSD Chain (Normal ↔ Reprint)'),
+            Line2D([0], [0], marker='o', color='gray', linewidth=0, markersize=5, alpha=0.8, label='Normal Test'),
+            Line2D([0], [0], marker='s', color='gray', linewidth=0, markersize=5, alpha=0.8, label='Reprint Test')
+        ]
+        ax2.legend(handles=rsd_legend_elements, loc='upper right')
+        
+        plt.tight_layout()
+        
+        # Save the plot
+        output_path = Path('First_Week_First_Cycle_Peak_Force_Histogram.png')
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        print(f"First cycle peak force histogram saved as: {output_path}")
+        
+        # Print summary statistics
+        print(f"\nSummary Statistics:")
+        print(f"Number of combinations analyzed: {len(stats_df)}")
+        print(f"Mean peak force range: {stats_df['Mean_Peak_Force_kN'].min():.3f} - {stats_df['Mean_Peak_Force_kN'].max():.3f} kN")
+        print(f"RSD range: {stats_df['RSD_Percent'].min():.1f}% - {stats_df['RSD_Percent'].max():.1f}%")
+        print(f"Average RSD: {stats_df['RSD_Percent'].mean():.1f}%")
+        
+        return output_path
+        
+    except Exception as e:
+        print(f"Error creating histogram: {e}")
+        return None
+
 def create_first_cycle_combined_csv(base_path):
     """
     Extract first cycle data from all tracking.csv files and create a combined CSV file
@@ -1580,6 +1741,13 @@ def main():
     print(f"{'='*60}")
     first_cycle_csv_path = create_first_cycle_combined_csv(base_path)
     
+    # Create histogram for first week first cycle peak forces if CSV exists
+    if first_cycle_csv_path and Path('First_Week_First_Cycle_Combined_Data.csv').exists():
+        print(f"\n{'='*60}")
+        print("Creating first week first cycle peak force histogram...")
+        print(f"{'='*60}")
+        histogram_path = plot_first_cycle_peak_force_histogram('First_Week_First_Cycle_Combined_Data.csv')
+    
     # Define all test weeks to analyze
     test_weeks = ['0 WK', '1 WK Repeats', '2 WK Repeats', '3 WK Repeats']
     
@@ -1663,10 +1831,11 @@ def main():
     print("ALL ANALYSIS COMPLETE!")
     print("Generated:")
     print("1. Combined first cycle data CSV file (All_Tests_First_Cycle_Combined_Data.csv)")
-    print("2. Individual test plots for each test week")
-    print("3. Cross-test peak force comparison plots for each filament-SVF combination")
-    print("4. Cross-test cycle comparison plots showing all combinations for cycles 1, 100, 1000")
-    print("5. Cross-test vertical stiffness comparison plots for similar VS groups (within 40 N/mm)")
+    print("2. First week first cycle peak force histogram with RSD overlay")
+    print("3. Individual test plots for each test week")
+    print("4. Cross-test peak force comparison plots for each filament-SVF combination")
+    print("5. Cross-test cycle comparison plots showing all combinations for cycles 1, 100, 1000")
+    print("6. Cross-test vertical stiffness comparison plots for similar VS groups (within 40 N/mm)")
     if first_cycle_csv_path:
         print(f"\nFirst cycle combined CSV saved at: {first_cycle_csv_path}")
     print(f"{'='*60}")
