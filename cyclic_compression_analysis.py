@@ -1797,6 +1797,121 @@ def plot_normal_vs_reprint_comparison(data_by_combination, test_name):
     print(f"Normal vs reprint comparison plots saved in: {comparison_dir}")
     return comparison_dir
 
+def create_tpu95a_50_detailed_comparison(data_by_combination, test_name):
+    """
+    Create a detailed comparison plot for TPU95A 50% SVF combination 
+    between normal and reprint sets in Test 1
+    """
+    print(f"\nCreating TPU95A 50% SVF detailed comparison for {test_name}...")
+    
+    # Create output directory for detailed comparison plots
+    comparison_dir = Path(f'{test_name} analysis_results/{test_name} normal_vs_reprint_comparison')
+    comparison_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Find all TPU95A 50% combinations and collect normal and reprint data
+    normal_data = None
+    reprint_data = None
+    filament = 95
+    svf = 50
+    
+    for combo_key, combo_data in data_by_combination.items():
+        if combo_data['filament'] == 95 and combo_data['svf'] == 50:
+            # Check if this combination has normal data
+            if 'normal' in combo_data and combo_data['normal']:
+                normal_data = combo_data['normal']
+                print(f"  Found TPU95A SVF 50% normal data (VS: {combo_data['vs']:.1f} N/mm)")
+            
+            # Check if this combination has reprint data
+            if 'reprint' in combo_data and combo_data['reprint']:
+                reprint_data = combo_data['reprint']
+                print(f"  Found TPU95A SVF 50% reprint data (VS: {combo_data['vs']:.1f} N/mm)")
+    
+    if not normal_data or not reprint_data:
+        print(f"  Missing data - Normal: {normal_data is not None}, Reprint: {reprint_data is not None}")
+        return None
+    
+    filament_name = get_filament_name(filament)
+    
+    print(f"  Found {filament_name} SVF {svf}% combination data")
+    
+    # Create the detailed comparison plot
+    fig, ax1 = plt.subplots(1, 1, figsize=(14, 8))
+    
+    # Peak Force vs Cycle comparison
+    
+    # Extract peak force data for both sets
+    # Use pre-calculated peak forces if available, otherwise calculate from full data
+    if 'cycles' in normal_data and 'peak_forces' in normal_data:
+        normal_cycles = normal_data['cycles']
+        normal_peak_forces = normal_data['peak_forces']
+    else:
+        normal_cycles, normal_peak_forces = find_peak_force_per_cycle(normal_data['full_data'])
+    
+    if 'cycles' in reprint_data and 'peak_forces' in reprint_data:
+        reprint_cycles = reprint_data['cycles']
+        reprint_peak_forces = reprint_data['peak_forces']
+    else:
+        reprint_cycles, reprint_peak_forces = find_peak_force_per_cycle(reprint_data['full_data'])
+    
+    # Plot peak forces
+    ax1.plot(normal_cycles, normal_peak_forces, 'b-o', markersize=4, linewidth=2, 
+             label='Normal Test', alpha=0.8)
+    ax1.plot(reprint_cycles, reprint_peak_forces, 'r-s', markersize=4, linewidth=2, 
+             label='Reprint Test', alpha=0.8)
+    
+    # Calculate and display statistics
+    if len(normal_peak_forces) > 0 and len(reprint_peak_forces) > 0:
+        # Find common cycle range for comparison
+        max_common_cycle = min(len(normal_peak_forces), len(reprint_peak_forces))
+        
+        if max_common_cycle > 0:
+            normal_subset = normal_peak_forces[:max_common_cycle]
+            reprint_subset = reprint_peak_forces[:max_common_cycle]
+            
+            # Calculate statistics
+            mean_diff = np.mean(normal_subset - reprint_subset)
+            rms_diff = np.sqrt(np.mean((normal_subset - reprint_subset)**2))
+            correlation = np.corrcoef(normal_subset, reprint_subset)[0,1]
+            
+            # Add statistics text
+            stats_text = f'Statistics (first {max_common_cycle} cycles):\n'
+            stats_text += f'Mean difference: {mean_diff:.3f} kN\n'
+            stats_text += f'RMS difference: {rms_diff:.3f} kN\n'
+            stats_text += f'Correlation: {correlation:.3f}'
+            
+            ax1.text(0.02, 0.98, stats_text, transform=ax1.transAxes, 
+                    bbox=dict(boxstyle='round,pad=0.5', facecolor='lightyellow', alpha=0.9),
+                    verticalalignment='top', fontsize=10, fontfamily='monospace')
+    
+    ax1.set_xlabel('Cycle Number', fontsize=12, fontweight='bold')
+    ax1.set_ylabel('Peak Force (kN)', fontsize=12, fontweight='bold')
+    ax1.set_title(f'{test_name} Peak Force Comparison - {filament_name} SVF {svf}%\nNormal vs Reprint Sets', 
+                 fontsize=14, fontweight='bold')
+    ax1.legend(fontsize=11)
+    ax1.grid(True, alpha=0.3)
+    
+    # Add overall combination info
+    fig.suptitle(f'{test_name} Detailed Comparison: {filament_name} SVF {svf}%\nNormal Set vs Reprint Set Analysis', 
+                fontsize=16, fontweight='bold', y=0.98)
+    
+    plt.tight_layout()
+    plt.subplots_adjust(top=0.92)
+    
+    # Save the plot in the normal vs reprint comparison folder
+    filament_name_file = get_filament_name(filament)
+    output_path = comparison_dir / f'{test_name}_{filament_name_file}_SVF_{svf}_percent_detailed_comparison.png'
+    plt.savefig(output_path, dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    print(f"  TPU95A 50% detailed comparison saved as: {output_path}")
+    
+    # Print detailed analysis to console
+    print(f"\n  Detailed Analysis for {filament_name} SVF {svf}%:")
+    print(f"     Normal set: {len(normal_data['full_data'])} data points, {len(normal_cycles)} cycles")
+    print(f"     Reprint set: {len(reprint_data['full_data'])} data points, {len(reprint_cycles)} cycles")
+    
+    return output_path
+
 def plot_vertical_stiffness_at_specific_cycles(data_by_combination, test_name, target_cycles=[1, 100, 1000]):
     """
     Create plots showing each combination's average vertical stiffness at specific cycles (1st, 100th, 1000th)
@@ -2468,7 +2583,9 @@ def main():
         if test_name == 'Test 1':
             print(f"Plot 5: Normal vs Reprint peak force comparison - {test_name}...")
             plot_normal_vs_reprint_comparison(data_by_combination, test_name)
-            print(f"Plot 6: Vertical stiffness at specific cycles (1st, 100th, 1000th) - {test_name}...")
+            print(f"Plot 6: TPU95A 50% detailed comparison - {test_name}...")
+            create_tpu95a_50_detailed_comparison(data_by_combination, test_name)
+            print(f"Plot 7: Vertical stiffness at specific cycles (1st, 100th, 1000th) - {test_name}...")
             plot_vertical_stiffness_at_specific_cycles(data_by_combination, test_name, [1, 100, 1000])
         
         print(f"\n{test_name} analysis complete! Plots saved in: {output_base}")
