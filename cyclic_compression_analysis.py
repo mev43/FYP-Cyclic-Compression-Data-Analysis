@@ -1355,6 +1355,123 @@ def plot_pairwise_force_displacement_overlaid(data_by_combination, test_name, pa
             plt.close()
             print(f"  Skipping pair {labelA} vs {labelB} — no usable data for requested cycles.")
 
+def plot_pairwise_peak_force_vs_cycle(data_by_combination, test_name, pair_list):
+    """
+    Create pairwise average peak force vs cycle plots for specified comparisons.
+    Each curve is averaged across normal + reprint and across VS buckets for that (filament, svf).
+    Saves outputs to the vertical_stiffness_comparison folder with filenames like:
+    Test_1_TPU87A_SVF_20_vs_TPU90A_SVF_20_peak_force_vs_cycle.png
+    """
+    def average_series(series_list):
+        if not series_list:
+            return None, None
+        if len(series_list) == 1:
+            return series_list[0]
+        # Prefer intersection of cycles
+        common = None
+        for c, _ in series_list:
+            s = set(c.tolist())
+            common = s if common is None else (common & s)
+        if common:
+            common = np.array(sorted(list(common)))
+            aligned = []
+            for c, f in series_list:
+                idx_map = {int(cc): i for i, cc in enumerate(c)}
+                vals = []
+                for cc in common:
+                    i = idx_map.get(int(cc))
+                    if i is None:
+                        vals = None
+                        break
+                    vals.append(f[i])
+                if vals is not None:
+                    aligned.append(np.array(vals))
+            if aligned:
+                return common, np.mean(aligned, axis=0)
+        # Fallback to min-length truncation
+        min_len = min(len(c) for c, _ in series_list)
+        if min_len == 0:
+            return None, None
+        cycles_ref = series_list[0][0][:min_len]
+        avg_forces = np.mean([f[:min_len] for _, f in series_list], axis=0)
+        return cycles_ref, avg_forces
+
+    # Build grouped peak-force series by (filament, svf)
+    grouped = {}
+    for _, combo_data in data_by_combination.items():
+        filament = combo_data.get('filament')
+        svf = combo_data.get('svf')
+        if filament is None or svf is None:
+            continue
+        key = (filament, svf)
+        if key not in grouped:
+            grouped[key] = []
+        for set_name in ['normal', 'reprint']:
+            if set_name in combo_data and combo_data[set_name]:
+                set_data = combo_data[set_name]
+                try:
+                    if 'cycles' in set_data and 'peak_forces' in set_data and len(set_data['cycles']) and len(set_data['peak_forces']):
+                        c_arr = np.array(set_data['cycles'])
+                        f_arr = np.array(set_data['peak_forces'])
+                    elif 'full_data' in set_data and set_data['full_data'] is not None:
+                        c_arr, f_arr = find_peak_force_per_cycle(set_data['full_data'])
+                    else:
+                        c_arr, f_arr = np.array([]), np.array([])
+                except Exception:
+                    c_arr, f_arr = np.array([]), np.array([])
+                if c_arr.size > 0 and f_arr.size > 0:
+                    # Exclude cycle 1001 globally
+                    mask = c_arr != 1001
+                    c_arr = c_arr[mask]
+                    f_arr = f_arr[mask]
+                    order = np.argsort(c_arr)
+                    grouped[key].append((c_arr[order], f_arr[order]))
+
+    # Output directory
+    out_dir = Path(f'{test_name} analysis_results/{test_name} vertical_stiffness_comparison')
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    for ((f1, s1), (f2, s2)) in pair_list:
+        sA = average_series(grouped.get((f1, s1), []))
+        sB = average_series(grouped.get((f2, s2), []))
+        if not sA or not sB or sA[0] is None or sB[0] is None:
+            print(f"  Skipping pair {get_filament_name(f1)} SVF {s1}% vs {get_filament_name(f2)} SVF {s2}% — insufficient data.")
+            continue
+
+        c1, y1 = sA
+        c2, y2 = sB
+        # Align to common cycles for plotting
+        common = sorted(list(set(c1.tolist()) & set(c2.tolist())))
+        if common:
+            common = np.array(common)
+            idx1 = {int(cc): i for i, cc in enumerate(c1)}
+            idx2 = {int(cc): i for i, cc in enumerate(c2)}
+            y1p = np.array([y1[idx1[int(cc)]] for cc in common])
+            y2p = np.array([y2[idx2[int(cc)]] for cc in common])
+            cx = common
+        else:
+            min_len = min(len(c1), len(c2))
+            cx = c1[:min_len]
+            y1p = y1[:min_len]
+            y2p = y2[:min_len]
+
+        fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+        name1 = get_filament_name(f1)
+        name2 = get_filament_name(f2)
+        ax.plot(cx, y1p, linewidth=2.5, alpha=0.9, label=f"{name1} SVF {s1}%")
+        ax.plot(cx, y2p, linewidth=2.5, alpha=0.9, label=f"{name2} SVF {s2}%")
+        ax.set_xlabel('Cycle Number', fontsize=12, fontweight='bold')
+        ax.set_ylabel('Average Peak Force (kN)', fontsize=12, fontweight='bold')
+        ax.set_title(f"{test_name} Pairwise Comparison\n{name1} SVF {s1}% vs {name2} SVF {s2}%", fontsize=14, fontweight='bold')
+        ax.legend(fontsize=11)
+        ax.grid(True, alpha=0.3)
+        plt.tight_layout()
+        fname = f"{test_name}_{name1}_SVF_{s1}_vs_{name2}_SVF_{s2}_peak_force_vs_cycle.png"
+        out_path = out_dir / fname
+        plt.savefig(out_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        print(f"  Pairwise peak force plot saved: {out_path}")
+
 def plot_cross_test_peak_force_comparison(base_path):
     """
     Plot peak force vs cycle for every filament-SVF combination across all tests
@@ -2755,6 +2872,9 @@ def main():
             ]
             print(f"Plot 4c: Pairwise force–displacement comparisons (overlaid cycles) - {test_name}...")
             plot_pairwise_force_displacement_overlaid(data_by_combination, test_name, requested_pairs, [1, 100, 1000])
+            # And the pairwise peak force vs cycle plots (the ones you mentioned)
+            print(f"Plot 4d: Pairwise peak force vs cycle - {test_name}...")
+            plot_pairwise_peak_force_vs_cycle(data_by_combination, test_name, requested_pairs)
         else:
             print(f"No VS groups found for {test_name}")
 
