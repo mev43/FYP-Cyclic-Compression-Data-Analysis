@@ -1205,6 +1205,156 @@ def plot_specific_cycles_by_vs_groups(data_by_combination, vs_groups, averaged_c
         
         print(f"  VS Group {group_idx+1} ({vs_range} N/mm) plots saved in: {group_folder}")
 
+def plot_pairwise_force_displacement_overlaid(data_by_combination, test_name, pair_list, cycles_of_interest=[1, 100, 1000]):
+    """
+    Create one force vs displacement figure per requested pairwise comparison, overlaying
+    the requested cycles on the same axes. Each test set (normal/reprint) is averaged per
+    combination and then across sets. Replicates the style of the VS-group force-displacement
+    plots but focused on specific pairwise comparisons instead of VS groups.
+    """
+    # Reuse averaging helper (time-based interpolation + normalization) from VS-group plots
+    def average_hysteresis_loops(displacements_list, forces_list):
+        if not displacements_list or not forces_list:
+            return None, None
+
+        processed_data = []
+        for disp, force in zip(displacements_list, forces_list):
+            valid_mask = ~(np.isnan(disp) | np.isnan(force))
+            disp_clean = disp[valid_mask]
+            force_clean = force[valid_mask]
+
+            if len(disp_clean) < 10:
+                continue
+
+            # Normalize displacement: zero at max (top), scale to ~ -6mm span if needed
+            min_disp = np.min(disp_clean)
+            max_disp = np.max(disp_clean)
+            disp_normalized = disp_clean - max_disp
+
+            disp_range = abs(min_disp - max_disp)
+            if disp_range > 0.1:
+                target_range = 6.0
+                scale_factor = target_range / disp_range
+                disp_normalized = disp_normalized * scale_factor
+
+            processed_data.append((disp_normalized, force_clean))
+
+        if len(processed_data) < 1:
+            return None, None
+
+        if len(processed_data) == 1:
+            return processed_data[0]
+
+        # Time-based averaging on the longest series
+        ref_idx = np.argmax([len(data[0]) for data in processed_data])
+        ref_disp, ref_force = processed_data[ref_idx]
+        all_forces = [ref_force]
+        for i, (disp, force) in enumerate(processed_data):
+            if i == ref_idx:
+                continue
+            ref_time = np.linspace(0, 1, len(ref_force))
+            data_time = np.linspace(0, 1, len(force))
+            interp_force = np.interp(ref_time, data_time, force)
+            all_forces.append(interp_force)
+        avg_force = np.mean(all_forces, axis=0)
+        return ref_disp, avg_force
+
+    # Helper: collect all loops (normal + reprint across VS buckets) for a specific combination and cycle
+    def collect_combo_cycle_loops(filament, svf, target_cycle):
+        disps, forces = [] , []
+        for _, combo_data in data_by_combination.items():
+            if combo_data.get('filament') != filament or combo_data.get('svf') != svf:
+                continue
+            # Normal
+            if 'normal' in combo_data and combo_data['normal'] and 'full_data' in combo_data['normal']:
+                df = combo_data['normal']['full_data']
+                cy = df[df['Total Cycles'] == target_cycle]
+                if not cy.empty:
+                    d = cy['Displacement(Linear:Digital Position) (mm)'].values
+                    f = cy['Force(Linear:Load) (kN)'].values
+                    if len(d) > 5 and len(f) > 5:
+                        disps.append(d)
+                        forces.append(f)
+            # Reprint
+            if 'reprint' in combo_data and combo_data['reprint'] and 'full_data' in combo_data['reprint']:
+                df = combo_data['reprint']['full_data']
+                cy = df[df['Total Cycles'] == target_cycle]
+                if not cy.empty:
+                    d = cy['Displacement(Linear:Digital Position) (mm)'].values
+                    f = cy['Force(Linear:Load) (kN)'].values
+                    if len(d) > 5 and len(f) > 5:
+                        disps.append(d)
+                        forces.append(f)
+        return disps, forces
+
+    # Output directory
+    out_dir = Path(f'{test_name} analysis_results/{test_name} pairwise_force_displacement')
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Line styles per cycle; no markers
+    cycle_styles = {
+        1:    {'linestyle': '-',  'linewidth': 2.6},
+        100:  {'linestyle': '--', 'linewidth': 2.6},
+        1000: {'linestyle': ':',  'linewidth': 2.6},
+    }
+
+    # Colors per combination in a pair
+    combo_colors = [('tab:blue', 'tab:orange'), ('tab:green', 'tab:red'), ('tab:purple', 'tab:brown')]
+
+    for idx, ((f1, s1), (f2, s2)) in enumerate(pair_list):
+        fig, ax = plt.subplots(1, 1, figsize=(12, 10))
+        colorA, colorB = combo_colors[idx % len(combo_colors)]
+        labelA = f"{get_filament_name(f1)} SVF {s1}%"
+        labelB = f"{get_filament_name(f2)} SVF {s2}%"
+
+        plotted_any = False
+
+        for cyc in cycles_of_interest:
+            # Combo A
+            dA, fA = collect_combo_cycle_loops(f1, s1, cyc)
+            avg_dA, avg_fA = average_hysteresis_loops(dA, fA) if dA and fA else (None, None)
+            # Combo B
+            dB, fB = collect_combo_cycle_loops(f2, s2, cyc)
+            avg_dB, avg_fB = average_hysteresis_loops(dB, fB) if dB and fB else (None, None)
+
+            style = cycle_styles.get(cyc, {'linestyle': '-', 'linewidth': 2.5})
+
+            if avg_dA is not None and avg_fA is not None:
+                ax.plot(avg_dA, avg_fA, color=colorA, linestyle=style['linestyle'], linewidth=style['linewidth'],
+                        alpha=0.9, label=f"{labelA} — Cycle {cyc}")
+                plotted_any = True
+            if avg_dB is not None and avg_fB is not None:
+                ax.plot(avg_dB, avg_fB, color=colorB, linestyle=style['linestyle'], linewidth=style['linewidth'],
+                        alpha=0.9, label=f"{labelB} — Cycle {cyc}")
+                plotted_any = True
+
+        if plotted_any:
+            ax.set_xlabel('Displacement (mm)', fontsize=12, fontweight='bold')
+            ax.set_ylabel('Force (kN)', fontsize=12, fontweight='bold')
+            ax.set_title(
+                f"{test_name} Pairwise Force–Displacement\n{labelA} vs {labelB} — Cycles {', '.join(map(str, cycles_of_interest))}",
+                fontsize=14, fontweight='bold'
+            )
+            # De-duplicate legend entries
+            handles, labels = ax.get_legend_handles_labels()
+            by_label = dict(zip(labels, handles))
+            ax.legend(by_label.values(), by_label.keys(), fontsize=10, loc='best', ncol=1)
+            ax.grid(True, alpha=0.3)
+            ax.text(0.02, 0.98, f"{labelA.split(' SVF')[0]} vs {labelB.split(' SVF')[0]}", transform=ax.transAxes,
+                    bbox=dict(boxstyle='round,pad=0.5', facecolor='lightcyan', alpha=0.9),
+                    verticalalignment='top', fontsize=10, fontweight='bold')
+            ax.set_xlim(-7, 1)
+            plt.tight_layout()
+
+            fname = f"{test_name}_{get_filament_name(f1)}_SVF_{s1}_vs_{get_filament_name(f2)}_SVF_{s2}_force_displacement_overlaid_cycles.png"
+            out_path = out_dir / fname
+            plt.savefig(out_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            print(f"  Pairwise FD (overlaid cycles) saved: {out_path}")
+        else:
+            plt.close()
+            print(f"  Skipping pair {labelA} vs {labelB} — no usable data for requested cycles.")
+
 def plot_cross_test_peak_force_comparison(base_path):
     """
     Plot peak force vs cycle for every filament-SVF combination across all tests
@@ -2597,6 +2747,14 @@ def main():
             print(f"Plot 4b: Force vs displacement by VS groups (similar vertical stiffnesses) - {test_name}...")
             plot_specific_cycles_by_vs_groups(data_by_combination, vs_groups, averaged_combinations, test_name, [1, 100, 1000])
             print(f"Generated {len(vs_groups)} VS groups force-displacement plots for {test_name}")
+            # Also generate the requested pairwise comparisons with overlaid cycles on one figure
+            requested_pairs = [
+                ((87, 20), (90, 20)),
+                ((87, 35), (95, 20)),
+                ((90, 50), (95, 35)),
+            ]
+            print(f"Plot 4c: Pairwise force–displacement comparisons (overlaid cycles) - {test_name}...")
+            plot_pairwise_force_displacement_overlaid(data_by_combination, test_name, requested_pairs, [1, 100, 1000])
         else:
             print(f"No VS groups found for {test_name}")
 
