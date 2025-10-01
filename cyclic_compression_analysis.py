@@ -177,11 +177,15 @@ def find_peak_force_per_cycle(df):
     peak_forces = []
     cycle_numbers = []
     
-    # Group by cycle number
-    cycles = df['Total Cycles'].unique()
+    # Group by cycle number, excluding any trailing cycle 1001
+    df_clean = df[df['Total Cycles'] != 1001]
+    cycles = np.sort(df_clean['Total Cycles'].unique())
     
     for cycle in cycles:
-        cycle_data = df[df['Total Cycles'] == cycle]
+        if cycle == 1001:
+            # Explicit guard (redundant due to df_clean) to ensure 1001 is never used
+            continue
+        cycle_data = df_clean[df_clean['Total Cycles'] == cycle]
         if not cycle_data.empty:
             # Find peak force (maximum absolute value) in this cycle
             forces = cycle_data['Force(Linear:Load) (kN)'].values
@@ -1484,11 +1488,9 @@ def plot_cross_test_cycle_comparison(base_path, target_cycles=[1, 100, 1000]):
                         
                         if avg_disp is not None and avg_force is not None:
                             color = test_colors.get(test_name, 'black')
-                            
-                            ax.plot(avg_disp, avg_force, 
-                                   color=color, linewidth=3, alpha=0.8, 
-                                   label=f'{test_name}', marker='o', markersize=2)
-                            
+                            ax.plot(avg_disp, avg_force,
+                                    color=color, linewidth=3, alpha=0.8,
+                                    label=f'{test_name}')
                             plot_created = True
             
             if plot_created:
@@ -1613,8 +1615,8 @@ def plot_first_cycle_peak_force_histogram(csv_path):
         bars2 = ax1.bar(x_pos + width/2, reprint_forces, width, label='Reprint Test', 
                        color='lightcoral', alpha=0.8, edgecolor='darkred')
         
-        # Add mean values as points
-        ax1.plot(x_pos, mean_forces, 'ko', markersize=8, label='Mean Peak Force', zorder=3)
+        # Add mean values as a line (no markers)
+        ax1.plot(x_pos, mean_forces, color='black', linewidth=2, label='Mean Peak Force', zorder=3)
         
         # Add error bars representing standard deviation
         ax1.errorbar(x_pos, mean_forces, yerr=[row['Std_Peak_Force_kN'] for _, row in stats_df.iterrows()], 
@@ -1651,13 +1653,7 @@ def plot_first_cycle_peak_force_histogram(csv_path):
             # Plot the RSD chain for this combination (2 points connected)
             ax2.plot([x-0.1, x+0.1], [rsd_normal, rsd_reprint], 
                     color=combo_color, linewidth=2, alpha=0.7, zorder=2)
-            
-            # Plot individual points
-            ax2.plot(x-0.1, rsd_normal, 'o', color=combo_color, markersize=5, 
-                    alpha=0.8, zorder=3, label='_nolegend_')
-            ax2.plot(x+0.1, rsd_reprint, 's', color=combo_color, markersize=5, 
-                    alpha=0.8, zorder=3, label='_nolegend_')
-            
+
             # Add RSD value label
             ax2.annotate(f'{rsd:.1f}%', (x, rsd), textcoords="offset points", 
                         xytext=(0,15), ha='center', fontsize=9, color='red', fontweight='bold')
@@ -1668,9 +1664,7 @@ def plot_first_cycle_peak_force_histogram(csv_path):
         # Add custom legend for RSD visualization
         from matplotlib.lines import Line2D
         rsd_legend_elements = [
-            Line2D([0], [0], color='gray', linewidth=2, alpha=0.7, label='RSD Chain (Normal ↔ Reprint)'),
-            Line2D([0], [0], marker='o', color='gray', linewidth=0, markersize=5, alpha=0.8, label='Normal Test'),
-            Line2D([0], [0], marker='s', color='gray', linewidth=0, markersize=5, alpha=0.8, label='Reprint Test')
+            Line2D([0], [0], color='gray', linewidth=2, alpha=0.7, label='RSD Chain (Normal ↔ Reprint)')
         ]
         ax2.legend(handles=rsd_legend_elements, loc='upper right')
         
@@ -1706,94 +1700,126 @@ def plot_normal_vs_reprint_comparison(data_by_combination, test_name):
     comparison_dir = Path(f'{test_name} analysis_results/{test_name} normal_vs_reprint_comparison')
     comparison_dir.mkdir(parents=True, exist_ok=True)
     
-    # Create plots for each filament-SVF combination
-    for combination_key, combo_data in data_by_combination.items():
-        filament, svf, vs = combo_data['filament'], combo_data['svf'], combo_data['vs']
+    # Build groups by (filament, svf) across all VS keys, so we always compare the two sets
+    grouped = {}
+    for _, combo_data in data_by_combination.items():
+        filament = combo_data['filament']
+        svf = combo_data['svf']
+        key = (filament, svf)
+        if key not in grouped:
+            grouped[key] = {'normal': [], 'reprint': []}
+
+        # Collect normal and reprint series (cycles, forces), excluding cycle 1001
+        for set_name in ['normal', 'reprint']:
+            if set_name in combo_data and combo_data[set_name]:
+                set_data = combo_data[set_name]
+                try:
+                    if 'cycles' in set_data and 'peak_forces' in set_data and len(set_data['cycles']) and len(set_data['peak_forces']):
+                        c_arr = np.array(set_data['cycles'])
+                        f_arr = np.array(set_data['peak_forces'])
+                    elif 'full_data' in set_data and set_data['full_data'] is not None:
+                        c_arr, f_arr = find_peak_force_per_cycle(set_data['full_data'])
+                    else:
+                        c_arr, f_arr = np.array([]), np.array([])
+                except Exception:
+                    c_arr, f_arr = np.array([]), np.array([])
+
+                if c_arr.size > 0 and f_arr.size > 0:
+                    mask = c_arr != 1001
+                    c_arr = c_arr[mask]
+                    f_arr = f_arr[mask]
+                    order = np.argsort(c_arr)
+                    grouped[key][set_name].append((c_arr[order], f_arr[order]))
+
+    # Helper to average multiple series to one
+    def average_series(series_list):
+        if not series_list:
+            return None, None
+        if len(series_list) == 1:
+            return series_list[0]
+        # try intersection of cycles
+        common = None
+        for c, _ in series_list:
+            s = set(c.tolist())
+            common = s if common is None else (common & s)
+        if common:
+            common = np.array(sorted(list(common)))
+            aligned = []
+            for c, f in series_list:
+                idx_map = {int(cc): i for i, cc in enumerate(c)}
+                vals = []
+                for cc in common:
+                    i = idx_map.get(int(cc))
+                    if i is None:
+                        vals = None
+                        break
+                    vals.append(f[i])
+                if vals is not None:
+                    aligned.append(np.array(vals))
+            if aligned:
+                return common, np.mean(aligned, axis=0)
+        # fallback to truncation by min length
+        min_len = min(len(c) for c, _ in series_list)
+        if min_len == 0:
+            return None, None
+        cycles_ref = series_list[0][0][:min_len]
+        avg_forces = np.mean([f[:min_len] for _, f in series_list], axis=0)
+        return cycles_ref, avg_forces
+
+    # Create plots per (filament, svf) where we have both normal and reprint groups
+    for (filament, svf), sets in sorted(grouped.items()):
         filament_name = get_filament_name(filament)
-        
-        # Check if both normal and reprint data exist
-        has_normal = 'normal' in combo_data and combo_data['normal']
-        has_reprint = 'reprint' in combo_data and combo_data['reprint']
-        
-        if not (has_normal and has_reprint):
+        normal_series = sets['normal']
+        reprint_series = sets['reprint']
+        if not normal_series or not reprint_series:
             print(f"  Skipping {filament_name} SVF {svf}% - missing normal or reprint data")
             continue
-        
+
+        n_cycles, n_forces = average_series(normal_series)
+        r_cycles, r_forces = average_series(reprint_series)
+        if n_cycles is None or r_cycles is None:
+            print(f"  Skipping {filament_name} SVF {svf}% - insufficient data after averaging")
+            continue
+
         fig, ax = plt.subplots(1, 1, figsize=(12, 8))
-        
-        # Plot normal test data
-        if has_normal:
-            normal_cycles = combo_data['normal']['cycles']
-            normal_forces = combo_data['normal']['peak_forces']
-            # Remove any zero or invalid values and ensure proper data range
-            valid_normal = [(c, f) for c, f in zip(normal_cycles, normal_forces) if f > 0 and not np.isnan(f)]
-            if valid_normal:
-                normal_cycles_clean, normal_forces_clean = zip(*valid_normal)
-                ax.plot(normal_cycles_clean, normal_forces_clean, 'b-o', linewidth=2, markersize=4, 
-                       label='Normal Test', alpha=0.8)
-        
-        # Plot reprint test data
-        if has_reprint:
-            reprint_cycles = combo_data['reprint']['cycles']
-            reprint_forces = combo_data['reprint']['peak_forces']
-            # Remove any zero or invalid values and ensure proper data range
-            valid_reprint = [(c, f) for c, f in zip(reprint_cycles, reprint_forces) if f > 0 and not np.isnan(f)]
-            if valid_reprint:
-                reprint_cycles_clean, reprint_forces_clean = zip(*valid_reprint)
-                ax.plot(reprint_cycles_clean, reprint_forces_clean, 'r-s', linewidth=2, markersize=4, 
-                       label='Reprint Test', alpha=0.8)
-        
-        # Calculate and show statistics
-        if has_normal and has_reprint:
-            # Use cleaned data for statistics
-            normal_forces_clean = [f for c, f in zip(normal_cycles, normal_forces) if f > 0 and not np.isnan(f)]
-            reprint_forces_clean = [f for c, f in zip(reprint_cycles, reprint_forces) if f > 0 and not np.isnan(f)]
-            
-            # Find common cycle range for comparison
-            max_cycles = min(len(normal_forces_clean), len(reprint_forces_clean))
-            if max_cycles > 0:
-                # Calculate average difference over the cycle range
-                common_cycles = min(max_cycles, 100)  # Compare first 100 cycles or available cycles
-                normal_avg = np.mean(normal_forces_clean[:common_cycles])
-                reprint_avg = np.mean(reprint_forces_clean[:common_cycles])
-                difference = abs(normal_avg - reprint_avg)
-                relative_diff = (difference / normal_avg) * 100
-                
-                # Add statistics text box
-                stats_text = f'Average Peak Force (first {common_cycles} cycles):\n'
-                stats_text += f'Normal: {normal_avg:.4f} kN\n'
-                stats_text += f'Reprint: {reprint_avg:.4f} kN\n'
-                stats_text += f'Difference: {difference:.4f} kN ({relative_diff:.2f}%)\n'
-                stats_text += f'Vertical Stiffness: {vs} N/mm'
-                
-                ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, 
-                       bbox=dict(boxstyle='round,pad=0.5', facecolor='lightgray', alpha=0.9),
-                       verticalalignment='top', fontsize=10, fontfamily='monospace')
-        
-        # Formatting
+        ax.plot(n_cycles, n_forces, color='blue', linewidth=2, label='Normal Test', alpha=0.85)
+        ax.plot(r_cycles, r_forces, color='red', linewidth=2, label='Reprint Test', alpha=0.85)
+
+        # Statistics over first common window
+        max_common = min(len(n_forces), len(r_forces))
+        if max_common > 0:
+            window = min(max_common, 100)
+            normal_avg = float(np.mean(n_forces[:window]))
+            reprint_avg = float(np.mean(r_forces[:window]))
+            difference = abs(normal_avg - reprint_avg)
+            relative_diff = (difference / normal_avg) * 100 if normal_avg != 0 else np.nan
+            stats_text = (
+                f'Average Peak Force (first {window} cycles):\n'
+                f'Normal: {normal_avg:.4f} kN\n'
+                f'Reprint: {reprint_avg:.4f} kN\n'
+                f'Difference: {difference:.4f} kN ({relative_diff:.2f}%)'
+            )
+            ax.text(0.02, 0.98, stats_text, transform=ax.transAxes,
+                    bbox=dict(boxstyle='round,pad=0.5', facecolor='lightgray', alpha=0.9),
+                    verticalalignment='top', fontsize=10, fontfamily='monospace')
+
         ax.set_xlabel('Cycle Number', fontsize=12, fontweight='bold')
         ax.set_ylabel('Peak Force (kN)', fontsize=12, fontweight='bold')
-        ax.set_title(f'{test_name} Normal vs Reprint Peak Force Comparison\n{filament_name}, SVF {svf}%', 
-                    fontsize=14, fontweight='bold')
+        ax.set_title(f'{test_name} Normal vs Reprint Peak Force Comparison\n{filament_name}, SVF {svf}%',
+                     fontsize=14, fontweight='bold')
         ax.legend(fontsize=11)
         ax.grid(True, alpha=0.3)
-        
-        # Add combination annotation
-        ax.text(0.98, 0.02, f'{filament_name}\nSVF {svf}%', transform=ax.transAxes, 
-               bbox=dict(boxstyle='round,pad=0.5', facecolor='lightblue', alpha=0.9),
-               verticalalignment='bottom', horizontalalignment='right', 
-               fontsize=12, fontweight='bold')
-        
+        ax.text(0.98, 0.02, f'{filament_name}\nSVF {svf}%', transform=ax.transAxes,
+                bbox=dict(boxstyle='round,pad=0.5', facecolor='lightblue', alpha=0.9),
+                verticalalignment='bottom', horizontalalignment='right', fontsize=12, fontweight='bold')
         plt.tight_layout()
-        
-        # Save plot
+
         filament_name_file = get_filament_name(filament)
         output_path = comparison_dir / f'{test_name}_{filament_name_file}_SVF_{svf}_percent_normal_vs_reprint.png'
         plt.savefig(output_path, dpi=300, bbox_inches='tight')
         plt.close()
-        
         print(f"  Normal vs reprint comparison for {filament_name} SVF {svf}% saved as: {output_path}")
-    
+
     print(f"Normal vs reprint comparison plots saved in: {comparison_dir}")
     return comparison_dir
 
@@ -1854,9 +1880,9 @@ def create_tpu95a_50_detailed_comparison(data_by_combination, test_name):
         reprint_cycles, reprint_peak_forces = find_peak_force_per_cycle(reprint_data['full_data'])
     
     # Plot peak forces
-    ax1.plot(normal_cycles, normal_peak_forces, 'b-o', markersize=4, linewidth=2, 
+    ax1.plot(normal_cycles, normal_peak_forces, color='blue', linewidth=2,
              label='Normal Test', alpha=0.8)
-    ax1.plot(reprint_cycles, reprint_peak_forces, 'r-s', markersize=4, linewidth=2, 
+    ax1.plot(reprint_cycles, reprint_peak_forces, color='red', linewidth=2,
              label='Reprint Test', alpha=0.8)
     
     # Calculate and display statistics
@@ -2300,8 +2326,8 @@ def plot_first_cycle_vertical_stiffness_histogram(csv_path):
         bars2 = ax1.bar(x_pos + width/2, reprint_vs_values, width, label='Reprint Test', 
                        color='lightsalmon', alpha=0.8, edgecolor='darkorange')
         
-        # Add mean values as points
-        ax1.plot(x_pos, mean_vs_values, 'ko', markersize=8, label='Mean Vertical Stiffness', zorder=3)
+        # Add mean values as a line (no markers)
+        ax1.plot(x_pos, mean_vs_values, color='black', linewidth=2, label='Mean Vertical Stiffness', zorder=3)
         
         # Add error bars representing standard deviation
         ax1.errorbar(x_pos, mean_vs_values, yerr=[row['Std_Vertical_Stiffness_N_per_mm'] for _, row in stats_df.iterrows()], 
@@ -2335,19 +2361,13 @@ def plot_first_cycle_vertical_stiffness_histogram(csv_path):
             rsd_normal = ((normal - mean_val) / mean_val) * 100 + rsd  # Offset from RSD center
             rsd_reprint = ((reprint - mean_val) / mean_val) * 100 + rsd  # Offset from RSD center
             
-            # Plot the RSD chain for this combination (2 points connected)
-            ax2.plot([x-0.1, x+0.1], [rsd_normal, rsd_reprint], 
-                    color=combo_color, linewidth=2, alpha=0.7, zorder=2)
-            
-            # Plot individual points
-            ax2.plot(x-0.1, rsd_normal, 'o', color=combo_color, markersize=5, 
-                    alpha=0.8, zorder=3, label='_nolegend_')
-            ax2.plot(x+0.1, rsd_reprint, 's', color=combo_color, markersize=5, 
-                    alpha=0.8, zorder=3, label='_nolegend_')
-            
-            # Add RSD value label
-            ax2.annotate(f'{rsd:.1f}%', (x, rsd), textcoords="offset points", 
-                        xytext=(0,15), ha='center', fontsize=9, color='red', fontweight='bold')
+        # Plot the RSD chain for this combination (connected line, no endpoint markers)
+        ax2.plot([x-0.1, x+0.1], [rsd_normal, rsd_reprint], 
+            color=combo_color, linewidth=2, alpha=0.7, zorder=2)
+
+        # Add RSD value label
+        ax2.annotate(f'{rsd:.1f}%', (x, rsd), textcoords="offset points", 
+             xytext=(0,15), ha='center', fontsize=9, color='red', fontweight='bold')
         
         ax2.set_ylabel('Relative Standard Deviation (%)', fontsize=12, fontweight='bold', color='red')
         ax2.tick_params(axis='y', labelcolor='red')
@@ -2355,9 +2375,7 @@ def plot_first_cycle_vertical_stiffness_histogram(csv_path):
         # Add custom legend for RSD visualization
         from matplotlib.lines import Line2D
         rsd_legend_elements = [
-            Line2D([0], [0], color='gray', linewidth=2, alpha=0.7, label='RSD Chain (Normal ↔ Reprint)'),
-            Line2D([0], [0], marker='o', color='gray', linewidth=0, markersize=5, alpha=0.8, label='Normal Test'),
-            Line2D([0], [0], marker='s', color='gray', linewidth=0, markersize=5, alpha=0.8, label='Reprint Test')
+            Line2D([0], [0], color='gray', linewidth=2, alpha=0.7, label='RSD Chain (Normal ↔ Reprint)')
         ]
         ax2.legend(handles=rsd_legend_elements, loc='upper right')
         
@@ -2558,13 +2576,17 @@ def main():
         
         print(f"Plot 1: Force vs displacement for specific cycles (1st, 100th, 1000th) - {test_name}...")
         plot_specific_cycles_force_displacement(data_by_combination, test_name, [1, 100, 1000])
-        
+
+        # NEW: Plot all average peak force vs cycle curves for all combinations on one graph
+        print(f"Plot X: All combinations average peak force vs cycle - {test_name}...")
+        plot_all_combinations_peak_force_vs_cycle(data_by_combination, test_name)
+
         print(f"Plot 2: Peak force vs cycle grouped by filament type (same SVF, different TPU types) - {test_name}...")
         plot_by_filament_type(data_by_combination, test_name)
-        
+
         print(f"Plot 3: Peak force vs cycle grouped by SVF percentage (same TPU filament, different SVF) - {test_name}...")
         plot_by_svf_percentage(data_by_combination, test_name)
-        
+
         # Generate VS groups plots for all tests
         print(f"Plot 4a: Peak force vs cycle comparison for similar vertical stiffnesses - {test_name}...")
         vs_groups_result = group_similar_vs(data_by_combination, tolerance=40)
@@ -2572,13 +2594,12 @@ def main():
         if vs_groups:
             plot_vs_groups_peak_force_comparison(data_by_combination, vs_groups, averaged_combinations, test_name)
             print(f"Generated {len(vs_groups)} VS groups peak force comparison plots for {test_name}")
-            
             print(f"Plot 4b: Force vs displacement by VS groups (similar vertical stiffnesses) - {test_name}...")
             plot_specific_cycles_by_vs_groups(data_by_combination, vs_groups, averaged_combinations, test_name, [1, 100, 1000])
             print(f"Generated {len(vs_groups)} VS groups force-displacement plots for {test_name}")
         else:
             print(f"No VS groups found for {test_name}")
-        
+
         # Generate normal vs reprint comparison plots for Test 1 only
         if test_name == 'Test 1':
             print(f"Plot 5: Normal vs Reprint peak force comparison - {test_name}...")
@@ -2587,61 +2608,168 @@ def main():
             create_tpu95a_50_detailed_comparison(data_by_combination, test_name)
             print(f"Plot 7: Vertical stiffness at specific cycles (1st, 100th, 1000th) - {test_name}...")
             plot_vertical_stiffness_at_specific_cycles(data_by_combination, test_name, [1, 100, 1000])
-        
+
         print(f"\n{test_name} analysis complete! Plots saved in: {output_base}")
         print(f"Generated plots in:")
         print(f"  - {test_name} vertical_stiffness_comparison/: Peak force vs cycle comparison plots for similar vertical stiffnesses")
         print(f"  - {test_name} force_displacement_cycles/: Force-displacement cycle plots")
-        print(f"  - {test_name} by_filament_type/: TPU filament comparison plots (same SVF, different filaments)")
-        print(f"  - {test_name} by_svf_percentage/: SVF comparison plots (same TPU filament, different SVFs)")
-        print(f"  - {test_name} force_displacement_by_vs_groups/: Force-displacement plots grouped by similar vertical stiffness")
-        if test_name == 'Test 1':
-            print(f"  - {test_name} normal_vs_reprint_comparison/: Normal vs Reprint peak force comparison plots")
-            print(f"  - {test_name} vertical_stiffness_at_cycles/: Vertical stiffness at specific cycles (1st, 100th, 1000th)")
-    
+
     print(f"\n{'='*60}")
     print("All individual tests analysis complete!")
     print(f"{'='*60}")
-    
+
     # Generate First Test First Cycle CSV and histogram plots
     print(f"\n{'='*60}")
     print("Creating First Test First Cycle CSV and histogram analysis...")
     print(f"{'='*60}")
-    
+
     # Create the First Test First Cycle CSV
     csv_path = create_first_test_first_cycle_csv(base_path)
-    
+
     if csv_path and csv_path.exists():
         print(f"\nGenerating histogram plots from: {csv_path}")
-        
         # Generate peak force histogram
         plot_first_cycle_peak_force_histogram(csv_path)
-        
         # Generate vertical stiffness histogram
         plot_first_cycle_vertical_stiffness_histogram(csv_path)
-        
         print("\nHistogram analysis complete!")
     else:
         print("\nSkipping histogram generation - CSV file not created")
-    
+
     # Generate cross-test comparison plots
     print(f"\n{'='*60}")
     print("Generating cross-test comparison plots...")
     print(f"{'='*60}")
-    
+
     # Plot peak force vs cycle for every filament-SVF combination across all tests
     plot_cross_test_peak_force_comparison(base_path)
-    
     # Plot specific cycles for every filament-SVF combination across all tests
     plot_cross_test_cycle_comparison(base_path, [1, 100, 1000])
-    
-    print(f"\n{'='*60}")
-    print("ALL ANALYSIS COMPLETE!")
-    print("Generated:")
-    print("1. Individual test plots for each test week")
-    print("2. Cross-test peak force comparison plots for each filament-SVF combination")
-    print("3. Cross-test cycle comparison plots showing all combinations for cycles 1, 100, 1000")
-    print(f"{'='*60}")
+
+# Place this function at module level, not inside main()
+def plot_all_combinations_peak_force_vs_cycle(data_by_combination, test_name):
+    """
+    For a given week, plot all average peak force vs cycle curves for all filament-SVF combinations on one graph.
+    """
+    import matplotlib.pyplot as plt
+    from pathlib import Path
+    print(f"\nPlotting all combinations' average peak force vs cycle for {test_name}...")
+    fig, ax = plt.subplots(1, 1, figsize=(14, 10))
+
+    # 1) Group all series by (filament, svf), collecting both normal and reprint across VS buckets
+    grouped = {}
+    for _, combo_data in data_by_combination.items():
+        filament = combo_data.get('filament')
+        svf = combo_data.get('svf')
+        if filament is None or svf is None:
+            continue
+        key = (filament, svf)
+        if key not in grouped:
+            grouped[key] = []  # list of (cycles, forces)
+
+        # collect series from normal & reprint
+        for set_name in ['normal', 'reprint']:
+            if set_name in combo_data and combo_data[set_name]:
+                set_data = combo_data[set_name]
+                try:
+                    if 'cycles' in set_data and 'peak_forces' in set_data and len(set_data['cycles']) and len(set_data['peak_forces']):
+                        c_arr = np.array(set_data['cycles'])
+                        f_arr = np.array(set_data['peak_forces'])
+                    elif 'full_data' in set_data and set_data['full_data'] is not None:
+                        c_arr, f_arr = find_peak_force_per_cycle(set_data['full_data'])
+                    else:
+                        c_arr, f_arr = np.array([]), np.array([])
+                except Exception:
+                    c_arr, f_arr = np.array([]), np.array([])
+                if c_arr.size > 0 and f_arr.size > 0:
+                    mask = c_arr != 1001
+                    c_arr = c_arr[mask]
+                    f_arr = f_arr[mask]
+                    order = np.argsort(c_arr)
+                    grouped[key].append((c_arr[order], f_arr[order]))
+
+    # Helper to average a list of series into one curve
+    def average_series(series_list):
+        if not series_list:
+            return None, None
+        if len(series_list) == 1:
+            return series_list[0]
+        # intersection of cycles preferred
+        common = None
+        for c, _ in series_list:
+            s = set(c.tolist())
+            common = s if common is None else (common & s)
+        if common:
+            common = np.array(sorted(list(common)))
+            aligned = []
+            for c, f in series_list:
+                idx_map = {int(cc): i for i, cc in enumerate(c)}
+                vals = []
+                for cc in common:
+                    i = idx_map.get(int(cc))
+                    if i is None:
+                        vals = None
+                        break
+                    vals.append(f[i])
+                if vals is not None:
+                    aligned.append(np.array(vals))
+            if aligned:
+                return common, np.mean(aligned, axis=0)
+        # fallback to min length truncation
+        min_len = min(len(c) for c, _ in series_list)
+        if min_len == 0:
+            return None, None
+        cycles_ref = series_list[0][0][:min_len]
+        avg_forces = np.mean([f[:min_len] for _, f in series_list], axis=0)
+        return cycles_ref, avg_forces
+
+    # 2) Prepare plotting order and colors; keep TPU95A 50% as one black line
+    group_keys = sorted(grouped.keys())
+    # Reserve color palette for all non-(95,50) groups
+    non_special = [k for k in group_keys if not (k[0] == 95 and k[1] == 50)]
+    colors = plt.cm.tab20(np.linspace(0, 1, max(1, len(non_special))))
+    color_map = {k: colors[i % len(colors)] for i, k in enumerate(non_special)}
+
+    plot_created = False
+    # First plot non-special groups
+    for key in non_special:
+        series_list = grouped[key]
+        cycles, forces = average_series(series_list)
+        if cycles is None or forces is None or len(cycles) == 0:
+            continue
+        filament, svf = key
+        filament_name = get_filament_name(filament)
+        label = f"{filament_name} SVF {svf}%"
+        ax.plot(cycles, forces, linewidth=2.0, color=color_map[key], label=label, alpha=0.95)
+        plot_created = True
+
+    # Then plot TPU95A 50% as aggregated black line if present
+    if (95, 50) in grouped:
+        cycles, forces = average_series(grouped[(95, 50)])
+        if cycles is not None and forces is not None and len(cycles) > 0:
+            ax.plot(cycles, forces, linewidth=2.6, color='black', label='TPU95A SVF 50% (Averaged)', alpha=1.0)
+            plot_created = True
+
+    ax.set_xlabel('Cycle Number', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Average Peak Force (kN)', fontsize=12, fontweight='bold')
+    ax.set_title(f'{test_name} - All Combinations\nAverage Peak Force vs Cycle', fontsize=14, fontweight='bold')
+    if plot_created:
+        n_items = len(group_keys)
+        ncol = 1 if n_items <= 12 else 2 if n_items <= 24 else 3
+        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=9, ncol=ncol)
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+
+    # Save plot in the vertical_stiffness_comparison folder
+    output_dir = Path(f'{test_name} analysis_results/{test_name} vertical_stiffness_comparison')
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f'{test_name}_all_combinations_peak_force_vs_cycle.png'
+    if plot_created:
+        plt.savefig(output_path, dpi=300, bbox_inches='tight')
+        print(f"  All combinations peak force vs cycle plot saved as: {output_path}")
+    else:
+        print("  No valid series found to plot for all-combinations figure; skipping save.")
+    plt.close()
 
 if __name__ == "__main__":
     main()
