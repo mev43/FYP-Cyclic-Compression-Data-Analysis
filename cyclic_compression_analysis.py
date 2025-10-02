@@ -1990,6 +1990,171 @@ def plot_cycle_peak_force_histogram(csv_path, cycle_num):
         print(f"Error creating cycle {cycle_num} peak force histogram: {e}")
         return None
 
+def compute_cycle_energy_loss(df, cycle_num):
+    """
+    Compute energy loss (hysteresis loop area) for a given cycle using the shoelace formula
+    over the F-x closed path. Units: kN*mm = Joules.
+
+    Returns a float (J) or None if insufficient data.
+    """
+    try:
+        if df is None or 'Total Cycles' not in df.columns:
+            return None
+        sub = df[df['Total Cycles'] == cycle_num]
+        if sub.empty or len(sub) < 3:
+            return None
+        # Coerce and drop NaNs
+        x = pd.to_numeric(sub['Displacement(Linear:Digital Position) (mm)'], errors='coerce').to_numpy()
+        y = pd.to_numeric(sub['Force(Linear:Load) (kN)'], errors='coerce').to_numpy()
+        mask = np.isfinite(x) & np.isfinite(y)
+        x = x[mask]
+        y = y[mask]
+        if len(x) < 3:
+            return None
+        # Close the loop for shoelace area computation
+        x_closed = np.append(x, x[0])
+        y_closed = np.append(y, y[0])
+        area = 0.5 * np.abs(np.sum(x_closed[:-1] * y_closed[1:] - x_closed[1:] * y_closed[:-1]))
+        # kN*mm equals Joules
+        return float(area)
+    except Exception:
+        return None
+
+def _parse_filament_svf_from_name(folder_name):
+    try:
+        import re
+        # Normalize separators
+        name = str(folder_name).replace('_', ' ').strip()
+        parts = name.split()
+
+        candidates = []
+        for i, token in enumerate(parts):
+            # Skip the date-like first token (e.g., 20250905)
+            if i == 0 and token.isdigit() and len(token) >= 6:
+                continue
+            # Pattern like '95-35'
+            if '-' in token:
+                t1, t2 = token.split('-', 1)
+                if t1.isdigit() and t2.isdigit():
+                    candidates.append((int(t1), int(t2)))
+            # Pattern like '95 35'
+            if token.isdigit() and i + 1 < len(parts) and parts[i + 1].isdigit():
+                candidates.append((int(token), int(parts[i + 1])))
+
+        def plausible(f, s):
+            return (80 <= f <= 99) and (10 <= s <= 60)
+
+        # Prefer plausible pairs; fall back to last candidate
+        chosen = None
+        for f, s in candidates:
+            if plausible(f, s):
+                chosen = (f, s)
+        if chosen is None and candidates:
+            chosen = candidates[-1]
+
+        if not chosen:
+            return None, None
+
+        filament, svf = chosen
+        if svf == 21:
+            svf = 20
+        return filament, svf
+    except Exception:
+        return None, None
+        if svf == 21:
+            svf = 20
+        return filament, svf
+    except Exception:
+        return None, None
+
+def plot_test1_average_energy_loss_histogram(base_path, cycles=[1, 100, 1000]):
+    """
+    Build a histogram (grouped bar chart) showing the average energy loss between the two samples
+    (normal and reprint) of each (filament, svf) combination for the specified cycles in Test 1 (0 WK).
+
+    Saves: 'Test_1_Average_Energy_Loss_Histogram.png' in the workspace root.
+    """
+    print("\nCreating Test 1 average energy loss histogram (cycles: {} )...".format(cycles))
+    week_folder = '0 WK'
+    week_path = Path(base_path) / week_folder
+    if not week_path.exists():
+        print(f"  Warning: {week_folder} folder not found; skipping energy loss histogram.")
+        return None
+
+    # Collect energy loss per (filament, svf, cycle) across samples
+    # data[(filament, svf)][cycle] -> list of values from samples
+    data = {}
+
+    for folder in week_path.iterdir():
+        if not folder.is_dir():
+            continue
+        filament, svf = _parse_filament_svf_from_name(folder.name)
+        if filament is None or svf is None:
+            continue
+        tracking_file = find_tracking_csv(folder)
+        if not tracking_file:
+            continue
+        df = load_tracking_data(tracking_file)
+        if df is None:
+            continue
+        key = (filament, svf)
+        if key not in data:
+            data[key] = {c: [] for c in cycles}
+        for c in cycles:
+            val = compute_cycle_energy_loss(df, c)
+            if val is not None:
+                data[key][c].append(val)
+
+    # Prepare plotting arrays
+    if not data:
+        print("  No energy loss data found for Test 1; skipping plot.")
+        return None
+
+    # Sort combinations for stable order
+    combos = sorted(list(data.keys()))
+    # Compute averages per cycle per combo
+    avg_matrix = []  # rows per cycle in 'cycles' order; columns per combo
+    for c in cycles:
+        row = []
+        for combo in combos:
+            vals = data.get(combo, {}).get(c, [])
+            row.append(float(np.mean(vals)) if vals else np.nan)
+        avg_matrix.append(row)
+
+    # Plot grouped bars per combo with one bar per cycle
+    num_combos = len(combos)
+    x = np.arange(num_combos)
+    width = min(0.2, 0.8 / max(1, len(cycles)))
+    fig_width = max(12, 0.6 * num_combos + 6)
+    fig, ax = plt.subplots(1, 1, figsize=(fig_width, 8))
+
+    colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red']
+    bars = []
+    for idx, c in enumerate(cycles):
+        offsets = (idx - (len(cycles)-1)/2) * (width + 0.02)
+        heights = np.array(avg_matrix[idx])
+        b = ax.bar(x + offsets, heights, width, label=f'Cycle {c}', color=colors[idx % len(colors)], alpha=0.9)
+        bars.append(b)
+
+    # X labels as "TPUXXA SVF YY%"
+    combo_labels = [f"{get_filament_name(f)} SVF {s}%" for (f, s) in combos]
+    ax.set_xticks(x)
+    ax.set_xticklabels(combo_labels, rotation=45, ha='right')
+    ax.set_xlabel('Filament–SVF Combinations', fontsize=12, fontweight='bold')
+    ax.set_ylabel('Average Energy Loss (J)', fontsize=12, fontweight='bold')
+    ax.set_title('Test 1 Average Energy Loss per Combination\nCycles 1, 100, and 1000 (mean across samples) — 1 kN·mm = 1 J')
+    ax.legend()
+    ax.grid(True, axis='y', alpha=0.3)
+
+    plt.tight_layout()
+    out_path = Path('Test_1_Average_Energy_Loss_Histogram.png')
+    try:
+        plt.savefig(out_path, dpi=300, bbox_inches='tight')
+        print(f"  Saved energy loss histogram: {out_path}")
+    finally:
+        plt.close()
+    return out_path
+
 def create_first_test_cycle_csv(base_path, cycle_num):
     """
     Extract specified cycle data from Test 1 (0 WK) tracking CSV files and create a CSV file.
@@ -2195,6 +2360,12 @@ def main():
     plot_cross_test_peak_force_comparison(base_path)
     # Plot specific cycles for every filament-SVF combination across all tests
     plot_cross_test_cycle_comparison(base_path, [1, 100, 1000])
+
+    # Create energy loss histogram for Test 1 (0 WK)
+    print(f"\n{'='*60}")
+    print("Generating Test 1 energy loss histogram (cycles 1, 100, 1000)...")
+    print(f"{'='*60}")
+    plot_test1_average_energy_loss_histogram(base_path, cycles=[1, 100, 1000])
 
 # Place this function at module level, not inside main()
 def plot_all_combinations_peak_force_vs_cycle(data_by_combination, test_name):
