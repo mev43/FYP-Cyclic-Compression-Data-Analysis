@@ -1726,6 +1726,169 @@ def plot_vertical_stiffness_at_specific_cycles(data_by_combination, test_name, c
         plt.close()
         print(f"  Saved VS-at-cycle plot: {out_path}")
 
+def plot_test1_vertical_stiffness_comparison_across_cycles(base_path, cycles=[1, 100, 1000]):
+    """
+    Replicate the 'Test 1 Vertical Stiffness Comparison Across Cycles' figure:
+    - X: Filament–SVF combinations (TPUxxA SVF yy%)
+    - Grouped bars per combo for cycles [1, 100, 1000]
+    - Height = average vertical stiffness (N/mm) across Print 1 and Print 2 (all specimens)
+    - Adds value labels on bars and a summary box with overall means per cycle
+
+    Output: 'Test 1 analysis_results/Test 1 vertical_stiffness_at_cycles/Test_1_VS_Comparison_Across_Cycles.png'
+    """
+    try:
+        week_folder = '0 WK'
+        test_name = 'Test 1'
+        week_path = Path(base_path) / week_folder
+        if not week_path.exists():
+            print(f"[Info] Week folder '{week_folder}' not found; skipping VS comparison across cycles plot.")
+            return None
+
+        # Helper: compute VS for a given cycle from a tracking dataframe
+        def compute_vs_for_cycle(df, cyc):
+            try:
+                sub = df[df['Total Cycles'] == cyc]
+                if sub.empty:
+                    return None
+                # Use original acquisition order up to max |force|
+                disp = sub['Displacement(Linear:Digital Position) (mm)'].to_numpy()
+                force_kN = sub['Force(Linear:Load) (kN)'].to_numpy()
+                if len(disp) < 3 or len(force_kN) < 3:
+                    return None
+                end_idx = max(2, int(np.argmax(np.abs(force_kN))))
+                x = disp[:end_idx + 1]
+                yN = force_kN[:end_idx + 1] * 1000.0  # N
+                if len(x) < 2:
+                    return None
+                A = np.vstack([x, np.ones(len(x))]).T
+                slope, _ = np.linalg.lstsq(A, yN, rcond=None)[0]
+                return float(slope)
+            except Exception:
+                return None
+
+        # Collect VS per (filament, svf, cycle) per Test_Type, then average Normal & Reprint means
+        data = {}  # {(filament, svf): {cycle: {'normal': [vs...], 'reprint': [vs...]}}}
+        for folder in week_path.iterdir():
+            if not folder.is_dir():
+                continue
+            # Parse filament & SVF robustly
+            filament, svf = (None, None)
+            try:
+                filament, svf = _parse_filament_svf_from_name(folder.name)
+            except Exception:
+                pass
+            if filament is None or svf is None:
+                f2, s2 = extract_parameters_from_filename(folder.name)
+                filament = filament if filament is not None else f2
+                svf = svf if svf is not None else s2
+            if filament is None or svf is None:
+                continue
+
+            fcsv = find_tracking_csv(folder)
+            if not fcsv:
+                continue
+            df = load_tracking_data(fcsv)
+            if df is None:
+                continue
+
+            key = (int(filament), int(svf))
+            if key not in data:
+                data[key] = {c: {'normal': [], 'reprint': []} for c in cycles}
+            ttype = 'reprint' if 'REPRINT' in folder.name.upper() else 'normal'
+            for cyc in cycles:
+                vs = compute_vs_for_cycle(df, cyc)
+                if vs is not None and np.isfinite(vs):
+                    data[key][cyc][ttype].append(vs)
+
+        if not data:
+            print("[Info] No VS data found for Test 1; skipping VS comparison across cycles plot.")
+            return None
+
+        # Prepare plot arrays: one bar per cycle for each combo, values = average of (Normal mean, Reprint mean)
+        combos = sorted(list(data.keys()))
+        vals = {c: [] for c in cycles}
+        for combo in combos:
+            for c in cycles:
+                bucket = data[combo].get(c, {'normal': [], 'reprint': []})
+                n_arr = np.array(bucket.get('normal', []), dtype=float)
+                r_arr = np.array(bucket.get('reprint', []), dtype=float)
+                n_arr = n_arr[np.isfinite(n_arr)]
+                r_arr = r_arr[np.isfinite(r_arr)]
+                n_mean = float(np.mean(n_arr)) if n_arr.size > 0 else np.nan
+                r_mean = float(np.mean(r_arr)) if r_arr.size > 0 else np.nan
+                if np.isfinite(n_mean) and np.isfinite(r_mean):
+                    vals[c].append((n_mean + r_mean) / 2.0)
+                elif np.isfinite(n_mean):
+                    vals[c].append(n_mean)
+                elif np.isfinite(r_mean):
+                    vals[c].append(r_mean)
+                else:
+                    vals[c].append(np.nan)
+
+        # Figure and axes
+        num_combos = len(combos)
+        x = np.arange(num_combos)
+        group_width = min(0.8, 0.15 + 0.1 * len(cycles))
+        width = group_width / max(1, len(cycles))
+        fig_width = max(16, 0.75 * num_combos + 6)
+        fig, ax = plt.subplots(1, 1, figsize=(fig_width, 9))
+
+        color_map = {1: '#66b3ff', 100: '#ff9999', 1000: '#99ff99'}  # blue, red, green-ish
+        bars_per_cycle = {}
+        for idx, c in enumerate(cycles):
+            offsets = -group_width/2 + (idx + 0.5) * width
+            bar_x = x + offsets
+            heights = vals[c]
+            bars = ax.bar(bar_x, heights, width, label=f'Cycle {c}',
+                          color=color_map.get(c, None), edgecolor='black', alpha=0.85)
+            bars_per_cycle[c] = (bar_x, bars)
+
+            # Value labels rounded to nearest integer
+            # for bx, h in zip(bar_x, heights):
+            #     if np.isfinite(h):
+            #         ax.text(bx, h + max(2, 0.01 * (np.nanmax(heights) if np.nanmax(heights) > 0 else 1)),
+            #                 f"{int(round(h))}", ha='center', va='bottom', fontsize=11, rotation=0)
+
+        # Axes formatting
+        combo_labels = [f"{get_filament_name(f)} SVF {s}%" for (f, s) in combos]
+        ax.set_xticks(x)
+        ax.set_xticklabels(combo_labels, rotation=45, ha='right')
+        ax.tick_params(axis='both', which='major', labelsize=14)
+        ax.set_xlabel('Filament-SVF Combinations', fontsize=14)
+        ax.set_ylabel('Average Vertical Stiffness (N/mm)', fontsize=14)
+        # ax.set_title('Test 1 Vertical Stiffness Comparison Across Cycles\nAll Combinations (Average of Normal & Reprint)', fontsize=14, fontweight='bold')
+        ax.grid(True, axis='y', alpha=0.3)
+        ax.legend(loc='upper left', fontsize=14)
+
+        # Summary statistics box (overall mean across combinations for each cycle)
+        try:
+            lines = []
+            for c in cycles:
+                arr = np.array(vals[c], dtype=float)
+                arr = arr[np.isfinite(arr)]
+                if arr.size > 0:
+                    lines.append(f"Cycle {c}: {np.mean(arr):.0f}±{np.std(arr, ddof=1):.1f} N/mm")
+                else:
+                    lines.append(f"Cycle {c}: N/A")
+            lines.append(f"Total Combinations: {len(combos)}")
+            text = "Summary Statistics:\n" + "\n".join(lines)
+            # ax.text(0.985, 0.97, text, transform=ax.transAxes, ha='right', va='top',
+            #         bbox=dict(boxstyle='round,pad=0.5', facecolor='ivory', alpha=0.9), fontsize=10)
+        except Exception:
+            pass
+
+        plt.tight_layout()
+        out_dir = Path(f'{test_name} analysis_results/{test_name} vertical_stiffness_at_cycles')
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / 'Test_1_VS_Comparison_Across_Cycles.png'
+        plt.savefig(out_path, dpi=300, bbox_inches='tight')
+        plt.close()
+        print(f"  Saved VS comparison across cycles plot: {out_path}")
+        return out_path
+    except Exception as e:
+        print(f"[Warn] plot_test1_vertical_stiffness_comparison_across_cycles failed: {e}")
+        return None
+
 def plot_cross_test_peak_force_comparison(base_path):
     """
     Plot peak force vs cycle for every filament-SVF combination across all tests
@@ -2299,7 +2462,7 @@ def plot_cycle_peak_force_histogram(csv_path, cycle_num):
                 rsd_reprint = ((reprint - mean_val) / mean_val) * 100 + rsd
                 ax2.plot([x-0.1, x+0.1], [rsd_normal, rsd_reprint], color='black', linewidth=2, alpha=0.7, zorder=2, marker='o')
             ax2.annotate(f'{rsd:.1f}%', (x, rsd), textcoords="offset points", 
-                         xytext=(0,15), ha='center', fontsize=14, color='black', fontweight='bold')
+                         xytext=(0,15), ha='center', fontsize=14, color='black')
         ax2.tick_params(axis='both', which='major', labelsize=14)
         ax2.set_ylabel('Relative Standard Deviation (%)', fontsize=14, color='black')
         ax2.tick_params(axis='y', labelcolor='black')
@@ -2703,6 +2866,12 @@ def main():
     print("Generating Test 1 energy loss histogram (cycles 1, 100, 1000)...")
     print(f"{'='*60}")
     plot_test1_average_energy_loss_histogram(base_path, cycles=[1, 100, 1000])
+
+    # Create VS comparison across cycles for Test 1
+    print(f"\n{'='*60}")
+    print("Generating Test 1 vertical stiffness comparison across cycles (1, 100, 1000)...")
+    print(f"{'='*60}")
+    plot_test1_vertical_stiffness_comparison_across_cycles(base_path, cycles=[1, 100, 1000])
 
 # Place this function at module level, not inside main()
 def plot_all_combinations_peak_force_vs_cycle(data_by_combination, test_name):
