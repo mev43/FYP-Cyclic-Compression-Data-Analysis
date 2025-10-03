@@ -2209,6 +2209,220 @@ def plot_cross_test_cycle_comparison(base_path, target_cycles=[1, 100, 1000]):
     print(f"  Cross-test cycle comparison plots saved in: {cycle_comparison_dir}")
     print(f"  Organization: Each cycle has its own subdirectory with separate plots for each filament-SVF combination")
 
+def plot_cross_test_peak_force_by_filament(base_path):
+    """
+    Create three plots (one per filament: TPU87A, TPU90A, TPU95A) that overlay
+    the peak force vs cycle curves for ALL SVFs for that filament, with one
+    line per test (Test 1–4) for each SVF.
+
+    Saves to: 'Cross Test Comparison analysis_results/Cross Test peak_force_vs_cycle'
+    with filenames like 'Cross_Test_TPU87A_all_SVFs_peak_force_vs_cycle.png'.
+    """
+    print("\nGenerating cross-test peak force per filament plots...")
+    week_map = {
+        'Test 1': '0 WK',
+        'Test 2': '1 WK Repeats',
+        'Test 3': '2 WK Repeats',
+        'Test 4': '3 WK Repeats',
+    }
+
+    # Helper: compute peak force per cycle for a dataframe
+    def pf_per_cycle(df):
+        try:
+            df_clean = df[df['Total Cycles'] != 1001]
+            cycles = sorted(df_clean['Total Cycles'].unique())
+            out_c, out_p = [], []
+            for c in cycles:
+                sub = df_clean[df_clean['Total Cycles'] == c]
+                if sub.empty:
+                    continue
+                peak_kN = np.max(np.abs(sub['Force(Linear:Load) (kN)'].to_numpy()))
+                out_c.append(c)
+                out_p.append(peak_kN)
+            return np.array(out_c, dtype=int), np.array(out_p, dtype=float)
+        except Exception:
+            return np.array([], dtype=int), np.array([], dtype=float)
+
+    # Helper: average a list of (cycles, values) series into one
+    def average_series(series_list):
+        if not series_list:
+            return None, None
+        if len(series_list) == 1:
+            return series_list[0]
+        # Prefer intersection of cycles
+        common = None
+        for c, _ in series_list:
+            if common is None:
+                common = set(c.tolist())
+            else:
+                common &= set(c.tolist())
+        if common:
+            cx = np.array(sorted(common), dtype=int)
+            aligned = []
+            for c, y in series_list:
+                idx = np.searchsorted(c, cx)
+                # Ensure exact match
+                mask = (idx < len(c)) & (c[idx] == cx)
+                vals = np.full_like(cx, np.nan, dtype=float)
+                vals[mask] = y[idx[mask]]
+                aligned.append(vals)
+            Y = np.nanmean(np.stack(aligned, axis=0), axis=0)
+            # Drop NaNs if any
+            valid = np.isfinite(Y)
+            return (cx[valid], Y[valid]) if np.any(valid) else (None, None)
+        # Fallback to min-length truncation on first series order
+        min_len = min(len(c) for c, _ in series_list)
+        if min_len == 0:
+            return None, None
+        cx = series_list[0][0][:min_len]
+        Y = np.mean([y[:min_len] for _, y in series_list], axis=0)
+        return cx, Y
+
+    # Gather series keyed by (filament, svf, test)
+    grouped = {}  # {(filament, svf, test_name): [ (cycles, peaks), ... ]}
+    for test_name, week_folder in week_map.items():
+        week_path = Path(base_path) / week_folder
+        if not week_path.exists():
+            continue
+        for folder in week_path.iterdir():
+            if not folder.is_dir():
+                continue
+            # Parse filament & SVF
+            filament, svf = (None, None)
+            try:
+                filament, svf = _parse_filament_svf_from_name(folder.name)
+            except Exception:
+                pass
+            if filament is None or svf is None:
+                f2, s2 = extract_parameters_from_filename(folder.name)
+                filament = filament if filament is not None else f2
+                svf = svf if svf is not None else s2
+            if filament is None or svf is None:
+                continue
+            fcsv = find_tracking_csv(folder)
+            if not fcsv:
+                continue
+            df = load_tracking_data(fcsv)
+            if df is None:
+                continue
+            c, p = pf_per_cycle(df)
+            if c.size == 0:
+                continue
+            key = (int(filament), int(svf), test_name)
+            grouped.setdefault(key, []).append((c, p))
+
+    # Average series per key
+    averaged = {}
+    for key, series_list in grouped.items():
+        cx, y = average_series(series_list)
+        if cx is None or y is None or len(cx) == 0:
+            continue
+        averaged[key] = (cx, y)
+
+    # Arrange by filament -> SVF -> test
+    filaments = sorted({k[0] for k in averaged.keys()})
+    if not filaments:
+        print("  No cross-test data available for per-filament plots; skipping.")
+        return
+
+    out_dir = Path('Cross Test Comparison analysis_results') / 'Cross Test peak_force_vs_cycle'
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # High-contrast styles per test (distinct linestyles + markers)
+    test_styles = {
+        'Test 1': {'linestyle': '-',  'linewidth': 2.4, 'marker': 'o'},
+        'Test 2': {'linestyle': '--', 'linewidth': 2.4, 'marker': 's'},
+        'Test 3': {'linestyle': '-.', 'linewidth': 2.4, 'marker': 'D'},
+        'Test 4': {'linestyle': ':',  'linewidth': 2.6, 'marker': '^'},
+    }
+
+    for fil in filaments:
+        # Gather available SVFs for this filament
+        svfs = sorted({k[1] for k in averaged.keys() if k[0] == fil})
+        if not svfs:
+            continue
+        fig, ax = plt.subplots(1, 1, figsize=(14, 10))
+        # Use a colorblind-friendly, high-contrast palette for SVFs
+        cmap = plt.get_cmap('tab10')
+        colors = [cmap(i % 10) for i in range(len(svfs))]
+        svf_color = {svf: colors[i] for i, svf in enumerate(svfs)}
+
+        plotted = False
+        for svf in svfs:
+            for test_name in ['Test 1', 'Test 2', 'Test 3', 'Test 4']:
+                key = (fil, svf, test_name)
+                if key not in averaged:
+                    continue
+                cx, y = averaged[key]
+                style = test_styles.get(test_name, {'linestyle': '-', 'linewidth': 2.2, 'marker': None})
+                # Reduce marker clutter with markevery; ensure at least every 1 if short series
+                me = max(1, len(cx) // 20)
+                ax.plot(
+                    cx,
+                    y,
+                    color=svf_color[svf],
+                    marker=style.get('marker', None),
+                    markevery=me if style.get('marker') else None,
+                    markersize=5.5,
+                    linestyle=style.get('linestyle', '-'),
+                    linewidth=style.get('linewidth', 2.2),
+                    alpha=0.95,
+                )
+                plotted = True
+
+        name = get_filament_name(fil)
+        ax.tick_params(axis='both', which='major', labelsize=14)
+        ax.set_xlabel('Cycle Number', fontsize=14)
+        ax.set_ylabel('Average Peak Force (kN)', fontsize=14)
+        ax.set_title(f'Cross Test: {name} — All SVFs\nPeak Force vs Cycle', fontsize=14, fontweight='bold')
+        if plotted:
+            # Build separate legends: one mapping color->SVF, another mapping linestyle/marker->Test
+            from matplotlib.lines import Line2D
+            svf_handles = [
+                Line2D([0], [0], color=svf_color[s], lw=3, label=f'SVF {s}%')
+                for s in svfs
+            ]
+            test_handles = [
+                Line2D(
+                    [0], [0],
+                    color='black',
+                    lw=test_styles[t]['linewidth'],
+                    ls=test_styles[t]['linestyle'],
+                    marker=test_styles[t]['marker'],
+                    markersize=6,
+                    label=t,
+                )
+                for t in ['Test 1', 'Test 2', 'Test 3', 'Test 4']
+            ]
+            leg1 = ax.legend(
+                handles=svf_handles,
+                title='SVF (color)',
+                bbox_to_anchor=(1.02, 1.0),
+                loc='upper left',
+                fontsize=12,
+                title_fontsize=12,
+                frameon=True,
+            )
+            ax.add_artist(leg1)
+            ax.legend(
+                handles=test_handles,
+                title='Test (style/marker)',
+                bbox_to_anchor=(1.02, 0.52),
+                loc='upper left',
+                fontsize=12,
+                title_fontsize=12,
+                frameon=True,
+            )
+        ax.grid(True, alpha=0.3)
+        plt.tight_layout()
+        out_path = out_dir / f'Cross_Test_{name}_all_SVFs_peak_force_vs_cycle.png'
+        if plotted:
+            plt.savefig(out_path, dpi=300, bbox_inches='tight')
+            print(f"  Saved per-filament cross-test plot: {out_path}")
+        else:
+            print(f"  No data to plot for filament {name}; skipping save.")
+        plt.close()
+
 def get_test_name(folder_name):
     """
     Convert folder name to test name
@@ -2860,6 +3074,8 @@ def main():
     plot_cross_test_peak_force_comparison(base_path)
     # Plot specific cycles for every filament-SVF combination across all tests
     plot_cross_test_cycle_comparison(base_path, [1, 100, 1000])
+    # Plot per-filament (all SVFs, all 4 tests on same figure)
+    plot_cross_test_peak_force_by_filament(base_path)
 
     # Create energy loss histogram for Test 1 (0 WK)
     print(f"\n{'='*60}")
