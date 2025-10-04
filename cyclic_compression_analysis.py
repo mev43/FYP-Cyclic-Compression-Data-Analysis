@@ -4,11 +4,62 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend
 import matplotlib.pyplot as plt
+from matplotlib.patches import FancyArrowPatch
 import seaborn as sns
 from pathlib import Path
 import warnings
 from scipy import stats
 warnings.filterwarnings('ignore')
+
+# -------------------------------------------------------------
+# Helper: annotate loading / unloading direction on hysteresis
+# -------------------------------------------------------------
+def _annotate_hysteresis_direction(ax, x, y, color=None, load_label='Loading', unload_label='Unloading'):
+    """Add larger arrows indicating loading (compression) & unloading and prepare ARROW legend handles.
+
+    Legend now shows actual arrowheads instead of plain/dashed lines:
+      - Loading: leftward arrow (compression direction as displacement becomes more negative)
+      - Unloading: rightward arrow (return toward zero displacement)
+    The per-curve arrows drawn on the plot retain the curve color; legend arrows are black for consistency.
+    """
+    try:
+        if x is None or y is None:
+            return
+        x = np.asarray(x); y = np.asarray(y)
+        if x.size < 6 or y.size != x.size:
+            return
+        idx_min = int(np.argmin(x))  # most negative displacement ~ end of loading
+        if idx_min < 3 or (x.size - idx_min) < 3:
+            return
+        load_progress_idx = max(2, int(0.6 * idx_min))
+        unload_seg_len = x.size - idx_min - 1
+        if unload_seg_len < 2:
+            return
+        unload_progress_idx = idx_min + max(1, int(0.6 * unload_seg_len))
+
+        def _arrow(i_from):
+            i_to = min(i_from + 1, x.size - 1)
+            return (x[i_from], y[i_from]), (x[i_to], y[i_to])
+
+        c = color or 'black'
+        arrow_style = dict(arrowstyle='-|>', color=c, lw=2.7, shrinkA=0, shrinkB=0, mutation_scale=24)
+        # Loading arrow (toward more negative displacement)
+        (lx0, ly0), (lx1, ly1) = _arrow(load_progress_idx)
+        ax.annotate('', xy=(lx1, ly1), xytext=(lx0, ly0), arrowprops=arrow_style)
+        # Unloading arrow (return toward zero displacement)
+        (ux0, uy0), (ux1, uy1) = _arrow(unload_progress_idx)
+        ax.annotate('', xy=(ux1, uy1), xytext=(ux0, uy0), arrowprops=arrow_style)
+
+        # Add legend arrow symbol handles once per axes (using Unicode arrow markers for reliability)
+        if not hasattr(ax, '_hyst_dir_handles_added'):
+            from matplotlib.lines import Line2D
+            loading_handle = Line2D([0], [0], marker=r'$\leftarrow$', markersize=18,
+                                    linestyle='None', label=load_label, color='k')
+            unloading_handle = Line2D([0], [0], marker=r'$\rightarrow$', markersize=18,
+                                      linestyle='None', label=unload_label, color='k')
+            ax._hyst_dir_handles_added = (loading_handle, unloading_handle)
+    except Exception:
+        pass
 
 def get_filament_name(filament_number):
     """
@@ -575,17 +626,35 @@ def plot_specific_cycles_force_displacement(data_by_combination, test_name, cycl
                 
                 if avg_disp is not None and avg_force is not None:
                     # Only plot averaged curve (no individual curves)
-                    ax.plot(avg_disp, avg_force, 
-                           color=cycle_colors.get(target_cycle, 'black'), 
-                           linewidth=3, alpha=0.9, 
-                           label=f'Cycle {target_cycle}')
+                    line = ax.plot(avg_disp, avg_force,
+                                   color=cycle_colors.get(target_cycle, 'black'),
+                                   linewidth=3, alpha=0.9,
+                                   label=f'Cycle {target_cycle}')
+                    try:
+                        # highlight first point (start of loading)
+                        ax.scatter([avg_disp[0]], [avg_force[0]], s=85, facecolors='white',
+                                   edgecolors=line[0].get_color(), linewidth=2.2, zorder=6)
+                        _annotate_hysteresis_direction(
+                            ax, avg_disp, avg_force,
+                            color=line[0].get_color(),
+                            load_label='Loading', unload_label='Unloading'
+                        )
+                    except Exception:
+                        pass
                     
         ax.tick_params(axis='both', which='major', labelsize=14)
         ax.set_xlabel('Displacement (mm)', fontsize=14)
         ax.set_ylabel('Force (kN)', fontsize=14)
         filament_name = get_filament_name(filament)
         # ax.set_title(f'{test_name} Force vs Displacement (Averaged over two sets) - {filament_name}, SVF {svf}%\n(Cycles 1, 100, 1000)')
-        ax.legend(fontsize=14)
+        handles, labels = ax.get_legend_handles_labels()
+        if hasattr(ax, '_hyst_dir_handles_added'):
+            lh, uh = ax._hyst_dir_handles_added
+            if 'Loading' not in labels:
+                handles.append(lh); labels.append('Loading')
+            if 'Unloading' not in labels:
+                handles.append(uh); labels.append('Unloading')
+        ax.legend(handles, labels, fontsize=14)
         ax.grid(True, alpha=0.3)
         
         # Set x-axis to show compression (negative values)
@@ -1036,8 +1105,18 @@ def plot_specific_cycles_by_vs_groups(data_by_combination, vs_groups, averaged_c
                                     avg_disp, avg_force = avg_result
                                     
                                     # Plot the averaged curve
-                                    ax.plot(avg_disp, avg_force, color=color, linewidth=2.5, alpha=0.8,
-                                           label=f'{filament_name} SVF {svf}% (Avg VS: {avg_vs:.0f} N/mm)')
+                                    line = ax.plot(avg_disp, avg_force, color=color, linewidth=2.5, alpha=0.85,
+                                                   label=f'{filament_name} SVF {svf}% (Avg VS: {avg_vs:.0f} N/mm)')
+                                    try:
+                                        ax.scatter([avg_disp[0]], [avg_force[0]], s=65, facecolors='white',
+                                                   edgecolors=line[0].get_color(), linewidth=1.8, zorder=6)
+                                        _annotate_hysteresis_direction(
+                                            ax, avg_disp, avg_force,
+                                            color=line[0].get_color(),
+                                            load_label='Loading', unload_label='Unloading'
+                                        )
+                                    except Exception:
+                                        pass
                                     plot_data_exists = True
             
             # Save plot after processing all combinations for this cycle
@@ -1048,7 +1127,14 @@ def plot_specific_cycles_by_vs_groups(data_by_combination, vs_groups, averaged_c
                 combo_summary = ", ".join([f"{get_filament_name(f)}-SVF {s}%" for f, s in sorted(unique_combinations)])
                 # ax.set_title(f'{test_name} Force vs Displacement - Cycle {target_cycle}\nVS Group {group_idx+1}: {vs_range} N/mm (Averaged by Filament-SVF)\nCombinations: {combo_summary}', 
                 #             fontsize=14)
-                ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=14)
+                handles, labels = ax.get_legend_handles_labels()
+                if hasattr(ax, '_hyst_dir_handles_added'):
+                    lh, uh = ax._hyst_dir_handles_added
+                    if 'Loading' not in labels:
+                        handles.append(lh); labels.append('Loading')
+                    if 'Unloading' not in labels:
+                        handles.append(uh); labels.append('Unloading')
+                ax.legend(handles, labels, bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=14)
                 ax.grid(True, alpha=0.3)
                 ax.set_xlim(-7, 1)  # Show compression range
                 
@@ -1204,12 +1290,28 @@ def plot_pairwise_force_displacement_overlaid(data_by_combination, test_name, pa
             style = cycle_styles.get(cyc, {'linestyle': '-', 'linewidth': 2.5})
 
             if avg_dA is not None and avg_fA is not None:
-                ax.plot(avg_dA, avg_fA, color=colorA, linestyle=style['linestyle'], linewidth=style['linewidth'],
-                        alpha=0.9, label=f"{labelA} — Cycle {cyc}")
+                lineA = ax.plot(avg_dA, avg_fA, color=colorA, linestyle=style['linestyle'], linewidth=style['linewidth'],
+                                alpha=0.9, label=f"{labelA} — Cycle {cyc}")
+                try:
+                    ax.scatter([avg_dA[0]], [avg_fA[0]], s=80, facecolors='white', edgecolors=lineA[0].get_color(), linewidth=2.2, zorder=6)
+                    _annotate_hysteresis_direction(
+                        ax, avg_dA, avg_fA, color=lineA[0].get_color(),
+                        load_label='Loading', unload_label='Unloading'
+                    )
+                except Exception:
+                    pass
                 plotted_any = True
             if avg_dB is not None and avg_fB is not None:
-                ax.plot(avg_dB, avg_fB, color=colorB, linestyle=style['linestyle'], linewidth=style['linewidth'],
-                        alpha=0.9, label=f"{labelB} — Cycle {cyc}")
+                lineB = ax.plot(avg_dB, avg_fB, color=colorB, linestyle=style['linestyle'], linewidth=style['linewidth'],
+                                alpha=0.9, label=f"{labelB} — Cycle {cyc}")
+                try:
+                    ax.scatter([avg_dB[0]], [avg_fB[0]], s=80, facecolors='white', edgecolors=lineB[0].get_color(), linewidth=2.2, zorder=6)
+                    _annotate_hysteresis_direction(
+                        ax, avg_dB, avg_fB, color=lineB[0].get_color(),
+                        load_label='Loading', unload_label='Unloading'
+                    )
+                except Exception:
+                    pass
                 plotted_any = True
 
         if plotted_any:
@@ -1223,7 +1325,15 @@ def plot_pairwise_force_displacement_overlaid(data_by_combination, test_name, pa
             # De-duplicate legend entries
             handles, labels = ax.get_legend_handles_labels()
             by_label = dict(zip(labels, handles))
-            ax.legend(by_label.values(), by_label.keys(), fontsize=14, loc='best', ncol=1)
+            handles = list(by_label.values())
+            labels = list(by_label.keys())
+            if hasattr(ax, '_hyst_dir_handles_added'):
+                lh, uh = ax._hyst_dir_handles_added
+                if 'Loading' not in labels:
+                    handles.append(lh); labels.append('Loading')
+                if 'Unloading' not in labels:
+                    handles.append(uh); labels.append('Unloading')
+            ax.legend(handles, labels, fontsize=14, loc='best', ncol=1)
             ax.grid(True, alpha=0.3)
             # ax.text(0.02, 0.98, f"{labelA.split(' SVF')[0]} vs {labelB.split(' SVF')[0]}", transform=ax.transAxes,
             #         bbox=dict(boxstyle='round,pad=0.5', facecolor='lightcyan', alpha=0.9),
@@ -2193,9 +2303,24 @@ def plot_cross_test_cycle_comparison(base_path, target_cycles=[1, 100, 1000]):
                         
                         if avg_disp is not None and avg_force is not None:
                             color = test_colors.get(test_name, 'black')
-                            ax.plot(avg_disp, avg_force,
-                                    color=color, linewidth=3, alpha=0.8,
-                                    label=f'{test_name}')
+                            line = ax.plot(avg_disp, avg_force,
+                                           color=color, linewidth=3, alpha=0.8,
+                                           label=f'{test_name}')
+                            # Highlight starting point of loading (first sample)
+                            try:
+                                ax.scatter([avg_disp[0]], [avg_force[0]], s=85, facecolors='white',
+                                           edgecolors=line[0].get_color(), linewidth=2.2, zorder=6)
+                            except Exception:
+                                pass
+                            # Annotate direction arrows (adds legend handles once)
+                            try:
+                                _annotate_hysteresis_direction(
+                                    ax, avg_disp, avg_force,
+                                    color=line[0].get_color(),
+                                    load_label='Loading', unload_label='Unloading'
+                                )
+                            except Exception:
+                                pass
                             plot_created = True
             
             if plot_created:
@@ -2204,7 +2329,15 @@ def plot_cross_test_cycle_comparison(base_path, target_cycles=[1, 100, 1000]):
                 ax.set_ylabel('Force (kN)', fontsize=14)
                 # ax.set_title(f'All Tests Force vs Displacement (Averaged across two sets) - Cycle {target_cycle}\n{filament_name}, SVF {svf}%',
                 #              fontsize=14, fontweight='bold')
-                ax.legend(fontsize=14, loc='best')
+                # Merge cycle/test legend entries with loading/unloading arrow handles (if added)
+                handles, labels = ax.get_legend_handles_labels()
+                if hasattr(ax, '_hyst_dir_handles_added'):
+                    lh, uh = ax._hyst_dir_handles_added
+                    if 'Loading' not in labels:
+                        handles.append(lh); labels.append('Loading')
+                    if 'Unloading' not in labels:
+                        handles.append(uh); labels.append('Unloading')
+                ax.legend(handles, labels, fontsize=14, loc='best')
                 ax.grid(True, alpha=0.3)
                 
                 # Add combination annotation
