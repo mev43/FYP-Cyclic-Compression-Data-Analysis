@@ -533,9 +533,10 @@ def plot_specific_cycles_force_displacement(data_by_combination, test_name, cycl
             min_disp = np.min(disp_clean)
             max_disp = np.max(disp_clean)
             
-            # Shift displacement so the maximum (least compressed) is at 0
-            # and minimum (most compressed) is around -6mm
-            disp_normalized = disp_clean - max_disp
+            # Shift displacement so the FIRST SAMPLE is at 0 mm (temporal start reference)
+            # This replaces previous normalization that used max_disp.
+            first_disp = disp_clean[0]
+            disp_normalized = disp_clean - first_disp
             
             # Scale if needed to get approximately -6mm range
             disp_range = abs(min_disp - max_disp)
@@ -971,9 +972,9 @@ def plot_specific_cycles_by_vs_groups(data_by_combination, vs_groups, averaged_c
             min_disp = np.min(disp_clean)
             max_disp = np.max(disp_clean)
             
-            # Shift displacement so the maximum (least compressed) is at 0
-            # and minimum (most compressed) is around -6mm
-            disp_normalized = disp_clean - max_disp
+            # First-point anchoring: shift so the very first sample is 0 mm
+            first_disp = disp_clean[0]
+            disp_normalized = disp_clean - first_disp
             
             # Scale if needed to get approximately -6mm range
             disp_range = abs(min_disp - max_disp)
@@ -1191,10 +1192,11 @@ def plot_pairwise_force_displacement_overlaid(data_by_combination, test_name, pa
             if len(disp_clean) < 10:
                 continue
 
-            # Normalize displacement: zero at max (top), scale to ~ -6mm span if needed
+            # First-point anchoring (was max-disp anchoring)
             min_disp = np.min(disp_clean)
             max_disp = np.max(disp_clean)
-            disp_normalized = disp_clean - max_disp
+            first_disp = disp_clean[0]
+            disp_normalized = disp_clean - first_disp
 
             disp_range = abs(min_disp - max_disp)
             # if disp_range > 0.1:
@@ -2203,7 +2205,8 @@ def plot_cross_test_cycle_comparison(base_path, target_cycles=[1, 100, 1000]):
             
             min_disp = np.min(disp_clean)
             max_disp = np.max(disp_clean)
-            disp_normalized = disp_clean - max_disp
+            first_disp = disp_clean[0]
+            disp_normalized = disp_clean - first_disp
             
             disp_range = abs(min_disp - max_disp)
             # if disp_range > 0.1:
