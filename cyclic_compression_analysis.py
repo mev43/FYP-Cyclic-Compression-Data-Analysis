@@ -488,10 +488,10 @@ def plot_specific_cycles_force_displacement(data_by_combination, test_name, cycl
             
             # Scale if needed to get approximately -6mm range
             disp_range = abs(min_disp - max_disp)
-            if disp_range > 0.1:  # Avoid division by zero
-                target_range = 6.0  # Target 6mm compression range
-                scale_factor = target_range / disp_range
-                disp_normalized = disp_normalized * scale_factor
+            # if disp_range > 0.1:  # Avoid division by zero
+            #     target_range = 6.0  # Target 6mm compression range
+            #     scale_factor = target_range / disp_range
+            #     disp_normalized = disp_normalized * scale_factor
             
             processed_data.append((disp_normalized, force_clean))
         
@@ -903,10 +903,10 @@ def plot_specific_cycles_by_vs_groups(data_by_combination, vs_groups, averaged_c
             
             # Scale if needed to get approximately -6mm range
             disp_range = abs(min_disp - max_disp)
-            if disp_range > 0.1:  # Avoid division by zero
-                target_range = 6.0  # Target 6mm compression range
-                scale_factor = target_range / disp_range
-                disp_normalized = disp_normalized * scale_factor
+            # if disp_range > 0.1:  # Avoid division by zero
+            #     target_range = 6.0  # Target 6mm compression range
+            #     scale_factor = target_range / disp_range
+            #     disp_normalized = disp_normalized * scale_factor
             
             processed_data.append((disp_normalized, force_clean))
         
@@ -1101,10 +1101,10 @@ def plot_pairwise_force_displacement_overlaid(data_by_combination, test_name, pa
             disp_normalized = disp_clean - max_disp
 
             disp_range = abs(min_disp - max_disp)
-            if disp_range > 0.1:
-                target_range = 6.0
-                scale_factor = target_range / disp_range
-                disp_normalized = disp_normalized * scale_factor
+            # if disp_range > 0.1:
+            #     target_range = 6.0
+            #     scale_factor = target_range / disp_range
+            #     disp_normalized = disp_normalized * scale_factor
 
             processed_data.append((disp_normalized, force_clean))
 
@@ -2081,10 +2081,10 @@ def plot_cross_test_cycle_comparison(base_path, target_cycles=[1, 100, 1000]):
             disp_normalized = disp_clean - max_disp
             
             disp_range = abs(min_disp - max_disp)
-            if disp_range > 0.1:
-                target_range = 6.0
-                scale_factor = target_range / disp_range
-                disp_normalized = disp_normalized * scale_factor
+            # if disp_range > 0.1:
+            #     target_range = 6.0
+            #     # scale_factor = target_range / disp_range
+            #     # disp_normalized = disp_normalized * scale_factor
             
             processed_data.append((disp_normalized, force_clean))
         
@@ -2374,7 +2374,7 @@ def plot_cross_test_peak_force_by_filament(base_path):
         ax.tick_params(axis='both', which='major', labelsize=14)
         ax.set_xlabel('Cycle Number', fontsize=14)
         ax.set_ylabel('Average Peak Force (kN)', fontsize=14)
-        ax.set_title(f'Cross Test: {name} — All SVFs\nPeak Force vs Cycle', fontsize=14, fontweight='bold')
+        # ax.set_title(f'Cross Test: {name} — All SVFs\nPeak Force vs Cycle', fontsize=14, fontweight='bold')
         if plotted:
             # Build separate legends: one mapping color->SVF, another mapping linestyle/marker->Test
             from matplotlib.lines import Line2D
@@ -2396,21 +2396,15 @@ def plot_cross_test_peak_force_by_filament(base_path):
             ]
             leg1 = ax.legend(
                 handles=svf_handles,
-                title='SVF (color)',
-                bbox_to_anchor=(1.02, 1.0),
-                loc='upper left',
-                fontsize=12,
-                title_fontsize=12,
+                loc='upper right',
+                fontsize=14,
                 frameon=True,
             )
             ax.add_artist(leg1)
             ax.legend(
                 handles=test_handles,
-                title='Test (style/marker)',
-                bbox_to_anchor=(1.02, 0.52),
-                loc='upper left',
-                fontsize=12,
-                title_fontsize=12,
+                loc='center right',
+                fontsize=14,
                 frameon=True,
             )
         ax.grid(True, alpha=0.3)
