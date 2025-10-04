@@ -493,7 +493,12 @@ def plot_specific_cycles_force_displacement(data_by_combination, test_name, cycl
             #     scale_factor = target_range / disp_range
             #     disp_normalized = disp_normalized * scale_factor
             
-            processed_data.append((disp_normalized, force_clean))
+            # Shift force so first value is 0 kN
+            if len(force_clean) > 0:
+                force_shifted = force_clean - force_clean[0]
+            else:
+                force_shifted = force_clean
+            processed_data.append((disp_normalized, force_shifted))
         
         if len(processed_data) < 1:
             return None, None
@@ -908,7 +913,12 @@ def plot_specific_cycles_by_vs_groups(data_by_combination, vs_groups, averaged_c
             #     scale_factor = target_range / disp_range
             #     disp_normalized = disp_normalized * scale_factor
             
-            processed_data.append((disp_normalized, force_clean))
+            # Shift force so first value is 0 kN
+            if len(force_clean) > 0:
+                force_shifted = force_clean - force_clean[0]
+            else:
+                force_shifted = force_clean
+            processed_data.append((disp_normalized, force_shifted))
         
         if len(processed_data) < 1:
             return None, None
@@ -1106,7 +1116,12 @@ def plot_pairwise_force_displacement_overlaid(data_by_combination, test_name, pa
             #     scale_factor = target_range / disp_range
             #     disp_normalized = disp_normalized * scale_factor
 
-            processed_data.append((disp_normalized, force_clean))
+            # Shift force so first value is 0 kN
+            if len(force_clean) > 0:
+                force_shifted = force_clean - force_clean[0]
+            else:
+                force_shifted = force_clean
+            processed_data.append((disp_normalized, force_shifted))
 
         if len(processed_data) < 1:
             return None, None
@@ -2086,7 +2101,12 @@ def plot_cross_test_cycle_comparison(base_path, target_cycles=[1, 100, 1000]):
             #     # scale_factor = target_range / disp_range
             #     # disp_normalized = disp_normalized * scale_factor
             
-            processed_data.append((disp_normalized, force_clean))
+            # Shift force so first value is 0 kN
+            if len(force_clean) > 0:
+                force_shifted = force_clean - force_clean[0]
+            else:
+                force_shifted = force_clean
+            processed_data.append((disp_normalized, force_shifted))
         
         if len(processed_data) < 1:
             return None, None
