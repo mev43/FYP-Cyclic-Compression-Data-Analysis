@@ -3015,6 +3015,104 @@ def plot_test1_average_energy_loss_histogram(base_path, cycles=[1, 100, 1000]):
         plt.close()
     return out_path
 
+def plot_cross_test_first_cycle_energy_loss_histogram(base_path, cycle=1):
+    """
+    Create a grouped bar histogram comparing FIRST CYCLE energy loss (hysteresis area, J)
+    across ALL tests (Test 1–4) for every filament–SVF combination observed in any test.
+
+    Bars: one per test (Test 1..4) for each combination. Height = mean energy loss across
+    available samples (normal + reprint specimens) in that test week. Missing data results
+    in no bar (NaN height).
+
+    Saves figure to:
+      'Cross Test Comparison analysis_results/Cross Test energy_loss/Cross_Test_First_Cycle_Energy_Loss_Histogram.png'
+    Returns Path or None if no data.
+    """
+    print("\nGenerating cross-test first cycle energy loss histogram...")
+    week_map = {
+        'Test 1': '0 WK',
+        'Test 2': '1 WK Repeats',
+        'Test 3': '2 WK Repeats',
+        'Test 4': '3 WK Repeats',
+    }
+    # data[(filament, svf)][test_name] -> list[energy_loss]
+    data = {}
+    for test_name, week_folder in week_map.items():
+        week_path = Path(base_path) / week_folder
+        if not week_path.exists():
+            print(f"  Warning: Week folder missing for {test_name} ({week_folder}); skipping.")
+            continue
+        for folder in week_path.iterdir():
+            if not folder.is_dir():
+                continue
+            filament, svf = _parse_filament_svf_from_name(folder.name)
+            if filament is None or svf is None:
+                continue
+            tracking_file = find_tracking_csv(folder)
+            if not tracking_file:
+                continue
+            df = load_tracking_data(tracking_file)
+            if df is None:
+                continue
+            val = compute_cycle_energy_loss(df, cycle)
+            if val is None:
+                continue
+            key = (filament, svf)
+            if key not in data:
+                data[key] = {tn: [] for tn in week_map.keys()}
+            data[key][test_name].append(val)
+
+    if not data:
+        print("  No energy loss data found across tests; histogram skipped.")
+        return None
+
+    combos = sorted(data.keys())
+    tests = list(week_map.keys())
+
+    # Compute mean matrix: rows = tests, cols = combos
+    mean_matrix = []
+    for test in tests:
+        row = []
+        for combo in combos:
+            vals = data[combo].get(test, [])
+            row.append(float(np.mean(vals)) if vals else np.nan)
+        mean_matrix.append(row)
+
+    # Plot
+    num_combos = len(combos)
+    x = np.arange(num_combos)
+    width = min(0.18, 0.75 / max(1, len(tests)))
+    fig_width = max(14, 0.6 * num_combos + 6)
+    fig, ax = plt.subplots(1, 1, figsize=(fig_width, 8))
+
+    test_colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red']
+    for idx, test in enumerate(tests):
+        offsets = (idx - (len(tests)-1)/2) * (width + 0.02)
+        heights = np.array(mean_matrix[idx])
+        # Bars with NaN heights won't render
+        ax.bar(x + offsets, heights, width, label=test, color=test_colors[idx % len(test_colors)], alpha=0.9)
+
+    combo_labels = [f"{get_filament_name(f)} SVF {s}%" for (f, s) in combos]
+    ax.set_xticks(x)
+    ax.set_xticklabels(combo_labels, rotation=45, ha='right')
+    ax.tick_params(axis='both', which='major', labelsize=14)
+    ax.set_xlabel('Filament–SVF Combinations', fontsize=14)
+    ax.set_ylabel('First Cycle Energy Loss (J)', fontsize=14)
+    # ax.set_title('Cross-Test First Cycle Energy Loss\n(Mean per Test; 1 kN·mm = 1 J)', fontsize=14)
+    ax.legend(fontsize=14)
+    ax.grid(True, axis='y', alpha=0.3)
+
+    plt.tight_layout()
+    out_dir = Path('Cross Test Comparison analysis_results') / 'Cross Test energy_loss'
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / 'Cross_Test_First_Cycle_Energy_Loss_Histogram.png'
+    try:
+        plt.savefig(out_path, dpi=300, bbox_inches='tight')
+        print(f"  Saved cross-test first cycle energy loss histogram: {out_path}")
+    finally:
+        plt.close()
+    return out_path
+
 def plot_test_average_energy_loss_histogram(base_path, test_name, cycles=[1, 100, 1000]):
     """
     Generalized version of the Test 1 energy loss histogram for any test week.
@@ -3317,6 +3415,8 @@ def main():
     plot_cross_test_cycle_comparison(base_path, [1, 100, 1000])
     # Plot per-filament (all SVFs, all 4 tests on same figure)
     plot_cross_test_peak_force_by_filament(base_path)
+    # Cross-test first cycle energy loss comparison
+    plot_cross_test_first_cycle_energy_loss_histogram(base_path, cycle=1)
 
     # Create energy loss histogram for Test 1 (0 WK)
     print(f"\n{'='*60}")
