@@ -3015,6 +3015,97 @@ def plot_test1_average_energy_loss_histogram(base_path, cycles=[1, 100, 1000]):
         plt.close()
     return out_path
 
+def plot_test_average_energy_loss_histogram(base_path, test_name, cycles=[1, 100, 1000]):
+    """
+    Generalized version of the Test 1 energy loss histogram for any test week.
+    Builds a grouped bar chart showing the average energy loss between the samples
+    (normal and reprint) of each (filament, svf) combination for the specified cycles.
+
+    Saves: 'Test_<n>_Average_Energy_Loss_Histogram.png' in the workspace root.
+    Returns the output path or None if skipped.
+    """
+    week_map = {
+        'Test 1': '0 WK',
+        'Test 2': '1 WK Repeats',
+        'Test 3': '2 WK Repeats',
+        'Test 4': '3 WK Repeats'
+    }
+    week_folder = week_map.get(test_name)
+    if not week_folder:
+        print(f"  Warning: Unknown test name '{test_name}'; skipping energy loss histogram.")
+        return None
+
+    print(f"\nCreating {test_name} average energy loss histogram (cycles: {cycles} )...")
+    week_path = Path(base_path) / week_folder
+    if not week_path.exists():
+        print(f"  Warning: {week_folder} folder not found; skipping energy loss histogram for {test_name}.")
+        return None
+
+    data = {}
+    for folder in week_path.iterdir():
+        if not folder.is_dir():
+            continue
+        filament, svf = _parse_filament_svf_from_name(folder.name)
+        if filament is None or svf is None:
+            continue
+        tracking_file = find_tracking_csv(folder)
+        if not tracking_file:
+            continue
+        df = load_tracking_data(tracking_file)
+        if df is None:
+            continue
+        key = (filament, svf)
+        if key not in data:
+            data[key] = {c: [] for c in cycles}
+        for c in cycles:
+            val = compute_cycle_energy_loss(df, c)
+            if val is not None:
+                data[key][c].append(val)
+
+    if not data:
+        print(f"  No energy loss data found for {test_name}; skipping plot.")
+        return None
+
+    combos = sorted(list(data.keys()))
+    avg_matrix = []
+    for c in cycles:
+        row = []
+        for combo in combos:
+            vals = data.get(combo, {}).get(c, [])
+            row.append(float(np.mean(vals)) if vals else np.nan)
+        avg_matrix.append(row)
+
+    num_combos = len(combos)
+    x = np.arange(num_combos)
+    width = min(0.2, 0.8 / max(1, len(cycles)))
+    fig_width = max(12, 0.6 * num_combos + 6)
+    fig, ax = plt.subplots(1, 1, figsize=(fig_width, 8))
+
+    colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red']
+    for idx, c in enumerate(cycles):
+        offsets = (idx - (len(cycles)-1)/2) * (width + 0.02)
+        heights = np.array(avg_matrix[idx])
+        ax.bar(x + offsets, heights, width, label=f'Cycle {c}', color=colors[idx % len(colors)], alpha=0.9)
+
+    combo_labels = [f"{get_filament_name(f)} SVF {s}%" for (f, s) in combos]
+    ax.tick_params(axis='both', which='major', labelsize=14)
+    ax.set_xticks(x)
+    ax.set_xticklabels(combo_labels, rotation=45, ha='right')
+    ax.set_xlabel('Filament–SVF Combinations', fontsize=14)
+    ax.set_ylabel('Average Energy Loss (J)', fontsize=14)
+    ax.legend(fontsize=14)
+    ax.grid(True, axis='y', alpha=0.3)
+
+    plt.tight_layout()
+    test_num = test_name.split()[-1]
+    out_path = Path(f'Test_{test_num}_Average_Energy_Loss_Histogram.png')
+    try:
+        plt.savefig(out_path, dpi=300, bbox_inches='tight')
+        print(f"  Saved energy loss histogram: {out_path}")
+    finally:
+        plt.close()
+    return out_path
+
 def create_first_test_cycle_csv(base_path, cycle_num):
     """
     Extract specified cycle data from Test 1 (0 WK) tracking CSV files and create a CSV file.
@@ -3231,7 +3322,9 @@ def main():
     print(f"\n{'='*60}")
     print("Generating Test 1 energy loss histogram (cycles 1, 100, 1000)...")
     print(f"{'='*60}")
-    plot_test1_average_energy_loss_histogram(base_path, cycles=[1, 100, 1000])
+    # Generate average energy loss histograms for all tests (1-4)
+    for tn in ['Test 1', 'Test 2', 'Test 3', 'Test 4']:
+        plot_test_average_energy_loss_histogram(base_path, tn, cycles=[1, 100, 1000])
 
     # Create VS comparison across cycles for Test 1
     print(f"\n{'='*60}")
