@@ -3113,6 +3113,91 @@ def plot_cross_test_first_cycle_energy_loss_histogram(base_path, cycle=1):
         plt.close()
     return out_path
 
+def plot_cross_test_cycle_energy_loss_histogram(base_path, cycle):
+    """Generic cross-test energy loss histogram for an arbitrary cycle (e.g., 100 or 1000)."""
+    print(f"\nGenerating cross-test cycle {cycle} energy loss histogram...")
+    if cycle == 1:
+        # Delegate to first-cycle function for consistency
+        return plot_cross_test_first_cycle_energy_loss_histogram(base_path, cycle=1)
+    week_map = {
+        'Test 1': '0 WK',
+        'Test 2': '1 WK Repeats',
+        'Test 3': '2 WK Repeats',
+        'Test 4': '3 WK Repeats',
+    }
+    data = {}
+    for test_name, week_folder in week_map.items():
+        week_path = Path(base_path) / week_folder
+        if not week_path.exists():
+            print(f"  Warning: Week folder missing for {test_name} ({week_folder}); skipping.")
+            continue
+        for folder in week_path.iterdir():
+            if not folder.is_dir():
+                continue
+            filament, svf = _parse_filament_svf_from_name(folder.name)
+            if filament is None or svf is None:
+                continue
+            tracking_file = find_tracking_csv(folder)
+            if not tracking_file:
+                continue
+            df = load_tracking_data(tracking_file)
+            if df is None:
+                continue
+            val = compute_cycle_energy_loss(df, cycle)
+            if val is None:
+                continue
+            key = (filament, svf)
+            if key not in data:
+                data[key] = {tn: [] for tn in week_map.keys()}
+            data[key][test_name].append(val)
+
+    if not data:
+        print(f"  No energy loss data found across tests for cycle {cycle}; histogram skipped.")
+        return None
+
+    combos = sorted(data.keys())
+    tests = list(week_map.keys())
+    mean_matrix = []
+    for test in tests:
+        row = []
+        for combo in combos:
+            vals = data[combo].get(test, [])
+            row.append(float(np.mean(vals)) if vals else np.nan)
+        mean_matrix.append(row)
+
+    num_combos = len(combos)
+    x = np.arange(num_combos)
+    width = min(0.18, 0.75 / max(1, len(tests)))
+    fig_width = max(14, 0.6 * num_combos + 6)
+    fig, ax = plt.subplots(1, 1, figsize=(fig_width, 8))
+
+    test_colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red']
+    for idx, test in enumerate(tests):
+        offsets = (idx - (len(tests)-1)/2) * (width + 0.02)
+        heights = np.array(mean_matrix[idx])
+        ax.bar(x + offsets, heights, width, label=test, color=test_colors[idx % len(test_colors)], alpha=0.9)
+
+    combo_labels = [f"{get_filament_name(f)} SVF {s}%" for (f, s) in combos]
+    ax.set_xticks(x)
+    ax.set_xticklabels(combo_labels, rotation=45, ha='right')
+    ax.tick_params(axis='both', which='major', labelsize=14)
+    ax.set_xlabel('Filament–SVF Combinations', fontsize=14)
+    ax.set_ylabel(f'Cycle {cycle} Energy Loss (J)', fontsize=14)
+    # ax.set_title(f'Cross-Test Cycle {cycle} Energy Loss (Mean per Test)', fontsize=14)
+    ax.legend(fontsize=14)
+    ax.grid(True, axis='y', alpha=0.3)
+
+    plt.tight_layout()
+    out_dir = Path('Cross Test Comparison analysis_results') / 'Cross Test energy_loss'
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f'Cross_Test_Cycle_{cycle}_Energy_Loss_Histogram.png'
+    try:
+        plt.savefig(out_path, dpi=300, bbox_inches='tight')
+        print(f"  Saved cross-test cycle {cycle} energy loss histogram: {out_path}")
+    finally:
+        plt.close()
+    return out_path
+
 def plot_test_average_energy_loss_histogram(base_path, test_name, cycles=[1, 100, 1000]):
     """
     Generalized version of the Test 1 energy loss histogram for any test week.
@@ -3417,6 +3502,9 @@ def main():
     plot_cross_test_peak_force_by_filament(base_path)
     # Cross-test first cycle energy loss comparison
     plot_cross_test_first_cycle_energy_loss_histogram(base_path, cycle=1)
+    # Cycles 100 and 1000 energy loss comparisons
+    plot_cross_test_cycle_energy_loss_histogram(base_path, cycle=100)
+    plot_cross_test_cycle_energy_loss_histogram(base_path, cycle=1000)
 
     # Create energy loss histogram for Test 1 (0 WK)
     print(f"\n{'='*60}")
