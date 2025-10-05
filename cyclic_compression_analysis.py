@@ -3621,16 +3621,17 @@ def plot_all_combinations_peak_force_vs_cycle(data_by_combination, test_name):
     if (95, 50) in grouped:
         cycles, forces = average_series(grouped[(95, 50)])
         if cycles is not None and forces is not None and len(cycles) > 0:
-            ax.plot(cycles, forces, linewidth=2.6, color='black', label='TPU95A SVF 50% (Averaged)', alpha=1.0)
+            ax.plot(cycles, forces, linewidth=2.6, color='black', label='TPU95A SVF 50%', alpha=1.0)
             plot_created = True
 
-    ax.set_xlabel('Cycle Number', fontsize=12, fontweight='bold')
-    ax.set_ylabel('Average Peak Force (kN)', fontsize=12, fontweight='bold')
-    ax.set_title(f'{test_name} - All Combinations\nAverage Peak Force vs Cycle', fontsize=14, fontweight='bold')
+    ax.set_xlabel('Cycle Number', fontsize=14)
+    ax.set_ylabel('Average Peak Force (kN)', fontsize=14)
+    ax.tick_params(axis='both', which='major', labelsize=14)
+    ax.set_title(f'{test_name} - All Combinations\nPeak Force vs Cycle', fontsize=14, fontweight='bold')
     if plot_created:
         n_items = len(group_keys)
         ncol = 1 if n_items <= 12 else 2 if n_items <= 24 else 3
-        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=9, ncol=ncol)
+        ax.legend(loc='upper right', fontsize=14, ncol=ncol)
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
 
