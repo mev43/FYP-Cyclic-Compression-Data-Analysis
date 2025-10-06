@@ -47,7 +47,7 @@ def _add_cycle_trend_arrow(ax, centroids, color='black'):
             nx = 0; ny = 0
         xm_off = xm + 0.05 * nx * norm
         ym_off = ym + 0.05 * ny * norm
-        ax.text(xm_off, ym_off, 'Cycle Trend', fontsize=12, fontweight='bold', color=color,
+        ax.text(xm_off, ym_off, 'Cycle Trend', fontsize=16, color='black',
                 ha='center', va='center', bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
     except Exception:
         pass
@@ -102,12 +102,40 @@ def _annotate_hysteresis_direction(ax, x, y, color=None, load_label='Loading', u
     except Exception:
         pass
 
+def get_filament_order_key(filament_tuple):
+    """
+    Custom sort key to ensure filaments are always ordered: 87, 90, 95
+    Input can be just filament number or (filament, svf) tuple
+    """
+    if isinstance(filament_tuple, tuple):
+        filament = filament_tuple[0]
+    else:
+        filament = filament_tuple
+    
+    # Define explicit order: 87 first, then 90, then 95
+    order_map = {87: 0, 90: 1, 95: 2}
+    return order_map.get(filament, 999)  # Unknown filaments go to end
+
+def get_filament_reverse_order_key(filament_tuple):
+    """
+    Custom sort key to ensure filaments are ordered in reverse: 95, 90, 87
+    Input can be just filament number or (filament, svf) tuple
+    """
+    if isinstance(filament_tuple, tuple):
+        filament = filament_tuple[0]
+    else:
+        filament = filament_tuple
+    
+    # Define explicit reverse order: 95 first, then 90, then 87
+    order_map = {95: 0, 90: 1, 87: 2}
+    return order_map.get(filament, 999)  # Unknown filaments go to end
+
 def get_filament_name(filament_number):
     """
     Convert filament number to proper TPU name
     """
-    filament_map = {87: 'TPU87A', 90: 'TPU90A', 95: 'TPU95A'}
-    return filament_map.get(filament_number, f'TPU{filament_number}A')
+    filament_map = {87: '87A TPU', 90: 'TPU90', 95: '95A TPU'}
+    return filament_map.get(filament_number, f'{filament_number} TPU')
 
 def create_output_directories(test_name):
     """
@@ -459,8 +487,8 @@ def plot_vs_groups_peak_force_comparison(data_by_combination, vs_groups, average
         
         colors = plt.cm.Set3(np.linspace(0, 1, len(unique_combinations)))
         
-        # Sort combinations for consistent plotting
-        unique_combinations = sorted(unique_combinations)
+        # Sort combinations for consistent plotting (87, then 90, then 95)
+        unique_combinations = sorted(unique_combinations, key=get_filament_order_key)
         
         for idx, (filament, svf) in enumerate(unique_combinations):
             color = colors[idx]
@@ -521,14 +549,14 @@ def plot_vs_groups_peak_force_comparison(data_by_combination, vs_groups, average
                                   color=color, alpha=0.2)
         
         ax.tick_params(axis='both', which='major', labelsize=14)
-        ax.set_xlabel('Cycle Number', fontsize=14)
-        ax.set_ylabel('Average Peak Force (kN)', fontsize=14)
+        ax.set_xlabel('Cycle Number', fontsize=16)
+        ax.set_ylabel('Peak Force (kN)', fontsize=16)
         
         # Create title with VS range and combination info
         vs_range = f"{min(vs_group):.0f}-{max(vs_group):.0f}" if len(vs_group) > 1 else f"{vs_group[0]:.0f}"
         combo_summary = ", ".join([f"{get_filament_name(f)} SVF {s}%" for f, s in unique_combinations])
         ax.set_title(f'{test_name} Peak Force vs Cycle (Averaged over two sets)\nSimilar Vertical Stiffnesses: VS Group {vs_range} N/mm\nCombinations: {combo_summary}', 
-                    fontsize=14, fontweight='bold')
+                    fontsize=16, fontweight='bold')
         ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
         ax.grid(True, alpha=0.3)
         
@@ -677,8 +705,8 @@ def plot_specific_cycles_force_displacement(data_by_combination, test_name, cycl
                         pass
                     
         ax.tick_params(axis='both', which='major', labelsize=14)
-        ax.set_xlabel('Displacement (mm)', fontsize=14)
-        ax.set_ylabel('Force (kN)', fontsize=14)
+        ax.set_xlabel('Displacement (mm)', fontsize=16)
+        ax.set_ylabel('Force (kN)', fontsize=16)
         filament_name = get_filament_name(filament)
         # ax.set_title(f'{test_name} Force vs Displacement (Averaged over two sets) - {filament_name}, SVF {svf}%\n(Cycles 1, 100, 1000)')
         handles, labels = ax.get_legend_handles_labels()
@@ -688,7 +716,7 @@ def plot_specific_cycles_force_displacement(data_by_combination, test_name, cycl
                 handles.append(lh); labels.append('Loading')
             if 'Unloading' not in labels:
                 handles.append(uh); labels.append('Unloading')
-        ax.legend(handles, labels, fontsize=14)
+        ax.legend(handles, labels, fontsize=16)
         ax.grid(True, alpha=0.3)
         
         # Set x-axis to show compression (negative values)
@@ -773,9 +801,9 @@ def plot_combined_average_by_vs(data_by_combination):
                           color=color, alpha=0.2)
     
     ax.set_xlabel('Cycle Number')
-    ax.set_ylabel('Average Peak Force (kN)')
+    ax.set_ylabel('Peak Force (kN)')
     ax.set_title('Test 1 Combined Average Peak Force vs Cycle by Vertical Stiffness\n(All Normal & Reprint Tests Averaged)')
-    ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=14)
+    ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=16)
     ax.grid(True, alpha=0.3)
     
     plt.tight_layout()
@@ -810,9 +838,11 @@ def plot_by_filament_type(data_by_combination, test_name):
     for svf, filament_data in svf_groups.items():
         fig, ax = plt.subplots(1, 1, figsize=(12, 8))
         
-        colors = plt.cm.Set1(np.linspace(0, 1, len(filament_data)))
+        # Sort filaments in reverse order (95, 90, 87) for legend display
+        sorted_filaments = sorted(filament_data.items(), key=lambda x: get_filament_reverse_order_key(x[0]))
+        colors = plt.cm.Set1(np.linspace(0, 1, len(sorted_filaments)))
         
-        for idx, (filament, test_data) in enumerate(filament_data.items()):
+        for idx, (filament, test_data) in enumerate(sorted_filaments):
             color = colors[idx]
             
             # Combine normal and reprint data for this filament
@@ -856,10 +886,10 @@ def plot_by_filament_type(data_by_combination, test_name):
                            linewidth=2, alpha=0.8)
                     
         ax.tick_params(axis='both', which='major', labelsize=14)
-        ax.set_xlabel('Cycle Number', fontsize=14)
-        ax.set_ylabel('Average Peak Force (kN)', fontsize=14)
+        ax.set_xlabel('Cycle Number', fontsize=16)
+        ax.set_ylabel('Peak Force (kN)', fontsize=16)
         # ax.set_title(f'{test_name} Peak Force vs Cycle (Averaged across two sets) - SVF {svf}%')
-        ax.legend(fontsize=14, loc='upper right')
+        ax.legend(fontsize=16, loc='upper right')
         ax.grid(True, alpha=0.3)
         
         plt.tight_layout()
@@ -939,17 +969,17 @@ def plot_by_svf_percentage(data_by_combination, test_name):
                            linewidth=2, alpha=0.8)
 
         ax.tick_params(axis='both', which='major', labelsize=14)
-        ax.set_xlabel('Cycle Number', fontsize=14)
-        ax.set_ylabel('Average Peak Force (kN)', fontsize=14)
+        ax.set_xlabel('Cycle Number', fontsize=16)
+        ax.set_ylabel('Peak Force (kN)', fontsize=16)
         filament_name = get_filament_name(filament)
         # ax.set_title(f'{test_name} Peak Force vs Cycle (Averaged over two sets) - {filament_name}\n(Comparison across SVF Percentages)')
-        ax.legend(fontsize=14, loc='upper right')
+        ax.legend(fontsize=16, loc='upper right')
         ax.grid(True, alpha=0.3)
         
         # # Add filament annotation
         # ax.text(0.02, 0.98, f'{filament_name}', transform=ax.transAxes, 
         #         bbox=dict(boxstyle='round,pad=0.5', facecolor='lightcoral', alpha=0.9),
-        #         verticalalignment='top', fontsize=14, fontweight='bold')
+        #         verticalalignment='top', fontsize=16, fontweight='bold')
         
         plt.tight_layout()
         
@@ -1053,9 +1083,9 @@ def plot_specific_cycles_by_vs_groups(data_by_combination, vs_groups, averaged_c
         for target_cycle in target_cycles:
             fig, ax = plt.subplots(1, 1, figsize=(12, 8))
             
-            # Create colors for each unique combination in this VS group
+            # Create colors for each unique combination in this VS group (maintain 87, 90, 95 order)
             colors = plt.cm.Set3(np.linspace(0, 1, len(unique_combinations)))
-            combination_colors = {combo: colors[i] for i, combo in enumerate(sorted(unique_combinations))}
+            combination_colors = {combo: colors[i] for i, combo in enumerate(sorted(unique_combinations, key=get_filament_order_key))}
             
             plot_data_exists = False
             # Plot each unique combination separately (now averaged by filament-SVF)
@@ -1144,11 +1174,11 @@ def plot_specific_cycles_by_vs_groups(data_by_combination, vs_groups, averaged_c
             # Save plot after processing all combinations for this cycle
             if plot_data_exists:
                 ax.tick_params(axis='both', which='major', labelsize=14)
-                ax.set_xlabel('Displacement (mm)', fontsize=14)
-                ax.set_ylabel('Force (kN)', fontsize=14)
-                combo_summary = ", ".join([f"{get_filament_name(f)}-SVF {s}%" for f, s in sorted(unique_combinations)])
+                ax.set_xlabel('Displacement (mm)', fontsize=16)
+                ax.set_ylabel('Force (kN)', fontsize=16)
+                combo_summary = ", ".join([f"{get_filament_name(f)}-SVF {s}%" for f, s in sorted(unique_combinations, key=get_filament_order_key)])
                 # ax.set_title(f'{test_name} Force vs Displacement - Cycle {target_cycle}\nVS Group {group_idx+1}: {vs_range} N/mm (Averaged by Filament-SVF)\nCombinations: {combo_summary}', 
-                #             fontsize=14)
+                #             fontsize=16)
                 handles, labels = ax.get_legend_handles_labels()
                 if hasattr(ax, '_hyst_dir_handles_added'):
                     lh, uh = ax._hyst_dir_handles_added
@@ -1156,7 +1186,7 @@ def plot_specific_cycles_by_vs_groups(data_by_combination, vs_groups, averaged_c
                         handles.append(lh); labels.append('Loading')
                     if 'Unloading' not in labels:
                         handles.append(uh); labels.append('Unloading')
-                ax.legend(handles, labels, bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=14)
+                ax.legend(handles, labels, bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=16)
                 ax.grid(True, alpha=0.3)
                 ax.set_xlim(-7, 1)  # Show compression range
                 
@@ -1343,11 +1373,11 @@ def plot_pairwise_force_displacement_overlaid(data_by_combination, test_name, pa
 
         if plotted_any:
             ax.tick_params(axis='both', which='major', labelsize=14)
-            ax.set_xlabel('Displacement (mm)', fontsize=14)
-            ax.set_ylabel('Force (kN)', fontsize=14)
+            ax.set_xlabel('Displacement (mm)', fontsize=16)
+            ax.set_ylabel('Force (kN)', fontsize=16)
             # ax.set_title(
             #     f"{test_name} Pairwise Force–Displacement\n{labelA} vs {labelB} — Cycles {', '.join(map(str, cycles_of_interest))}",
-            #     fontsize=14, fontweight='bold'
+            #     fontsize=16, fontweight='bold'
             # )
             # De-duplicate legend entries
             handles, labels = ax.get_legend_handles_labels()
@@ -1360,7 +1390,7 @@ def plot_pairwise_force_displacement_overlaid(data_by_combination, test_name, pa
                     handles.append(lh); labels.append('Loading')
                 if 'Unloading' not in labels:
                     handles.append(uh); labels.append('Unloading')
-            ax.legend(handles, labels, fontsize=14, loc='best', ncol=1)
+            ax.legend(handles, labels, fontsize=16, loc='best', ncol=1)
             ax.grid(True, alpha=0.3)
             # ax.text(0.02, 0.98, f"{labelA.split(' SVF')[0]} vs {labelB.split(' SVF')[0]}", transform=ax.transAxes,
             #         bbox=dict(boxstyle='round,pad=0.5', facecolor='lightcyan', alpha=0.9),
@@ -1485,10 +1515,10 @@ def plot_pairwise_peak_force_vs_cycle(data_by_combination, test_name, pair_list)
         ax.plot(cx, y1p, linewidth=2.5, alpha=0.9, label=f"{name1} SVF {s1}%")
         ax.plot(cx, y2p, linewidth=2.5, alpha=0.9, label=f"{name2} SVF {s2}%")
         ax.tick_params(axis='both', which='major', labelsize=14)
-        ax.set_xlabel('Cycle Number', fontsize=14)
-        ax.set_ylabel('Average Peak Force (kN)', fontsize=14)
-        # ax.set_title(f"{test_name} Pairwise Comparison\n{name1} SVF {s1}% vs {name2} SVF {s2}%", fontsize=14, fontweight='bold')
-        ax.legend(fontsize=14)
+        ax.set_xlabel('Cycle Number', fontsize=16)
+        ax.set_ylabel('Peak Force (kN)', fontsize=16)
+        # ax.set_title(f"{test_name} Pairwise Comparison\n{name1} SVF {s1}% vs {name2} SVF {s2}%", fontsize=16, fontweight='bold')
+        ax.legend(fontsize=16)
         ax.grid(True, alpha=0.3)
         plt.tight_layout()
         fname = f"{test_name}_{name1}_SVF_{s1}_vs_{name2}_SVF_{s2}_peak_force_vs_cycle.png"
@@ -1593,23 +1623,23 @@ def plot_normal_vs_reprint_comparison(data_by_combination, test_name):
         # Print 1 subplot
         if len(cx_n):
             ax1.plot(cx_n, pn_plot, color='tab:blue', linewidth=2.6, label='Print 1')
-        ax1.set_xlabel('Cycle Number', fontsize=14)
-        ax1.set_ylabel('Peak Force (kN)', fontsize=14)
+        ax1.set_xlabel('Cycle Number', fontsize=16)
+        ax1.set_ylabel('Peak Force (kN)', fontsize=16)
         ax1.tick_params(axis='both', which='major', labelsize=13)
         ax1.grid(True, alpha=0.3)
-        ax1.set_title('Print 1', fontsize=14)
+        # ax1.set_title('Print 1', fontsize=16)
         if len(cx_n):
-            ax1.legend(fontsize=12)
+            ax1.legend(fontsize=16)
 
         # Print 2 subplot
         if len(cx_r):
             ax2.plot(cx_r, pr_plot, color='tab:orange', linewidth=2.6, label='Print 2')
-        ax2.set_xlabel('Cycle Number', fontsize=14)
+        ax2.set_xlabel('Cycle Number', fontsize=16)
         ax2.tick_params(axis='both', which='major', labelsize=13)
         ax2.grid(True, alpha=0.3)
-        ax2.set_title('Print 2', fontsize=14)
+        # ax2.set_title('Print 2', fontsize=16)
         if len(cx_r):
-            ax2.legend(fontsize=12)
+            ax2.legend(fontsize=16)
 
         # Overall (optional) super-title could be re-enabled if needed
         # fig.suptitle(f'{test_name} {name} SVF {s}% Peak Force vs Cycle', fontsize=15, fontweight='bold')
@@ -1732,16 +1762,16 @@ def plot_first_cycle_vertical_stiffness_histogram(csv_path):
         # Plot mean ± SD without connecting lines between means (marker-only)
         # ax1.errorbar(x, stats['Mean_VS'], yerr=stats['Std_VS'], fmt='ok', capsize=5, label='Mean Vertical Stiffness')
         ax1.tick_params(axis='both', which='major', labelsize=14)
-        ax1.set_xlabel('Filament-SVF Combinations', fontsize=14)
-        ax1.set_ylabel('Vertical Stiffness (N/mm)', fontsize=14)
-        # ax1.set_title('Test 1 (First Week) First Cycle Vertical Stiffness Analysis\nVertical Stiffness by Combination with Individual RSD Calculations', fontsize=14)
+        ax1.set_xlabel('Filament-SVF Combinations', fontsize=16)
+        ax1.set_ylabel('Vertical Stiffness (N/mm)', fontsize=16)
+        # ax1.set_title('Test 1 (First Week) First Cycle Vertical Stiffness Analysis\nVertical Stiffness by Combination with Individual RSD Calculations', fontsize=16)
         ax1.set_xticks(x)
         ax1.set_xticklabels(stats['ComboLabel'], rotation=45, ha='right')
         ax1.grid(True, axis='y', alpha=0.3)
-        ax1.legend(loc='upper left', fontsize=14)
+        ax1.legend(loc='upper left', fontsize=16)
         ax2 = ax1.twinx()
         ax2.tick_params(axis='both', which='major', labelsize=14)
-        ax2.set_ylabel('Relative Standard Deviation (%)', fontsize=14, color='red')
+        ax2.set_ylabel('Relative Standard Deviation (%)', fontsize=16, color='red')
         ax2.tick_params(axis='y', labelcolor='red')
         # Draw per-combination RSD chain computed from normal/reprint around their midpoint
         colors = plt.cm.Set3(np.linspace(0, 1, len(stats)))
@@ -1755,9 +1785,9 @@ def plot_first_cycle_vertical_stiffness_histogram(csv_path):
                     ax2.plot([xi - width/2, xi + width/2], [rsd + offset_n, rsd + offset_r], linewidth=2, alpha=0.8, c='black', marker='o')
             # Annotate RSD at center
             ax2.annotate(f"{rsd:.1f}%", (xi, rsd), textcoords="offset points", xytext=(0, 8),
-                         ha='center', fontsize=14, color='red')
+                         ha='center', fontsize=16, color='red')
         from matplotlib.lines import Line2D
-        # ax2.legend(handles=[Line2D([0], [0], color='gray', linewidth=2, alpha=0.7, label='RSD Chain (Normal ↔ Reprint)')], loc='upper right', fontsize=14)
+        # ax2.legend(handles=[Line2D([0], [0], color='gray', linewidth=2, alpha=0.7, label='RSD Chain (Normal ↔ Reprint)')], loc='upper right', fontsize=16)
         plt.tight_layout()
         out_path = Path('Test_1_First_Cycle_Vertical_Stiffness_Histogram.png')
         plt.savefig(out_path, dpi=300, bbox_inches='tight')
@@ -1842,7 +1872,7 @@ def plot_vertical_stiffness_at_specific_cycles(data_by_combination, test_name, c
             data[cyc][key][ttype].append(val)
 
     for cyc in cycles:
-        combos = sorted(list(data[cyc].keys()))
+        combos = sorted(list(data[cyc].keys()), key=get_filament_order_key)
         if not combos:
             print(f"  No VS data for cycle {cyc}; skipping.")
             continue
@@ -1871,16 +1901,16 @@ def plot_vertical_stiffness_at_specific_cycles(data_by_combination, test_name, c
         # Plot mean ± SD without connecting lines between means (marker-only)
         # ax1.errorbar(x, means, yerr=stds, fmt='ok', capsize=5, label='Mean Vertical Stiffness')
         ax1.tick_params(axis='both', which='major', labelsize=14)
-        ax1.set_xlabel('Filament-SVF Combinations', fontsize=14)
-        ax1.set_ylabel('Vertical Stiffness (N/mm)', fontsize=14)
-        # ax1.set_title(f'{test_name} Vertical Stiffness at Cycle {cyc}', fontsize=14)
+        ax1.set_xlabel('Filament-SVF Combinations', fontsize=16)
+        ax1.set_ylabel('Vertical Stiffness (N/mm)', fontsize=16)
+        # ax1.set_title(f'{test_name} Vertical Stiffness at Cycle {cyc}', fontsize=16)
         ax1.set_xticks(x)
         ax1.set_xticklabels(labels, rotation=45, ha='right')
         ax1.grid(True, axis='y', alpha=0.3)
-        ax1.legend(loc='upper left', fontsize=14)
+        ax1.legend(loc='upper left', fontsize=16)
         ax2 = ax1.twinx()
         ax2.tick_params(axis='both', which='major', labelsize=14)
-        ax2.set_ylabel('Relative Standard Deviation (%)', fontsize=14, color='red')
+        ax2.set_ylabel('Relative Standard Deviation (%)', fontsize=16, color='red')
         ax2.tick_params(axis='y', labelcolor='red')
         colors = plt.cm.Set3(np.linspace(0, 1, len(x)))
         for i, (xi, rsd, n_val, r_val) in enumerate(zip(x, rsds, normals, reprints)):
@@ -1892,9 +1922,9 @@ def plot_vertical_stiffness_at_specific_cycles(data_by_combination, test_name, c
                     ax2.plot([xi - width/2, xi + width/2], [rsd + offset_n, rsd + offset_r],
                              linewidth=2, alpha=0.8, c='black', marker='o')
             ax2.annotate(f"{rsd:.1f}%", (xi, rsd), textcoords="offset points", xytext=(0, 8),
-                         ha='center', fontsize=14, color='red')
+                         ha='center', fontsize=16, color='red')
         from matplotlib.lines import Line2D
-        # ax2.legend(handles=[Line2D([0], [0], color='gray', linewidth=2, alpha=0.7, label='RSD Chain (Normal ↔ Reprint)')], loc='upper right', fontsize=14)
+        # ax2.legend(handles=[Line2D([0], [0], color='gray', linewidth=2, alpha=0.7, label='RSD Chain (Normal ↔ Reprint)')], loc='upper right', fontsize=16)
         plt.tight_layout()
         out_path = out_dir / f'Cycle_{cyc}_Vertical_Stiffness_Histogram.png'
         plt.savefig(out_path, dpi=300, bbox_inches='tight')
@@ -1980,7 +2010,7 @@ def plot_test1_vertical_stiffness_comparison_across_cycles(base_path, cycles=[1,
             return None
 
         # Prepare plot arrays: one bar per cycle for each combo, values = average of (Normal mean, Reprint mean)
-        combos = sorted(list(data.keys()))
+        combos = sorted(list(data.keys()), key=get_filament_order_key)
         vals = {c: [] for c in cycles}
         for combo in combos:
             for c in cycles:
@@ -2029,11 +2059,11 @@ def plot_test1_vertical_stiffness_comparison_across_cycles(base_path, cycles=[1,
         ax.set_xticks(x)
         ax.set_xticklabels(combo_labels, rotation=45, ha='right')
         ax.tick_params(axis='both', which='major', labelsize=14)
-        ax.set_xlabel('Filament-SVF Combinations', fontsize=14)
-        ax.set_ylabel('Average Vertical Stiffness (N/mm)', fontsize=14)
-        # ax.set_title('Test 1 Vertical Stiffness Comparison Across Cycles\nAll Combinations (Average of Normal & Reprint)', fontsize=14, fontweight='bold')
+        ax.set_xlabel('Filament-SVF Combinations', fontsize=16)
+        ax.set_ylabel('Vertical Stiffness (N/mm)', fontsize=16)
+        # ax.set_title('Test 1 Vertical Stiffness Comparison Across Cycles\nAll Combinations (Average of Normal & Reprint)', fontsize=16, fontweight='bold')
         ax.grid(True, axis='y', alpha=0.3)
-        ax.legend(loc='upper left', fontsize=14)
+        ax.legend(loc='upper left', fontsize=16)
 
         # Summary statistics box (overall mean across combinations for each cycle)
         try:
@@ -2106,8 +2136,8 @@ def plot_cross_test_peak_force_comparison(base_path):
     
     print(f"  Found {len(all_combinations)} unique filament-SVF combinations across all tests")
     
-    # Create a plot for each filament-SVF combination
-    for filament, svf in sorted(all_combinations):
+    # Create a plot for each filament-SVF combination (maintain 87, 90, 95 order)
+    for filament, svf in sorted(all_combinations, key=get_filament_order_key):
         filament_name = get_filament_name(filament)
         
         fig, ax = plt.subplots(1, 1, figsize=(14, 10))
@@ -2171,10 +2201,10 @@ def plot_cross_test_peak_force_comparison(base_path):
         
         if plot_created:
             ax.tick_params(axis='both', which='major', labelsize=14)
-            ax.set_xlabel('Cycle Number', fontsize=14)
-            ax.set_ylabel('Average Peak Force (kN)', fontsize=14)
-            # ax.set_title(f'All Tests Peak Force vs Cycle (Averaged across two sets)\n{filament_name}, SVF {svf}%', fontsize=14)
-            ax.legend(fontsize=14)
+            ax.set_xlabel('Cycle Number', fontsize=16)
+            ax.set_ylabel('Peak Force (kN)', fontsize=16)
+            # ax.set_title(f'All Tests Peak Force vs Cycle (Averaged across two sets)\n{filament_name}, SVF {svf}%', fontsize=16)
+            ax.legend(fontsize=16)
             ax.grid(True, alpha=0.3)
             
             # Add combination annotation
@@ -2301,8 +2331,8 @@ def plot_cross_test_cycle_comparison(base_path, target_cycles=[1, 100, 1000]):
         cycle_dir = cycle_comparison_dir / f'Cycle_{target_cycle}'
         cycle_dir.mkdir(parents=True, exist_ok=True)
         
-        # Create a separate plot for each filament-SVF combination
-        for filament, svf in sorted(all_combinations):
+        # Create a separate plot for each filament-SVF combination (maintain 87, 90, 95 order)
+        for filament, svf in sorted(all_combinations, key=get_filament_order_key):
             filament_name = get_filament_name(filament)
             
             fig, ax = plt.subplots(1, 1, figsize=(12, 10))
@@ -2376,10 +2406,10 @@ def plot_cross_test_cycle_comparison(base_path, target_cycles=[1, 100, 1000]):
             
             if plot_created:
                 ax.tick_params(axis='both', which='major', labelsize=14)
-                ax.set_xlabel('Displacement (mm)', fontsize=14)
-                ax.set_ylabel('Force (kN)', fontsize=14)
+                ax.set_xlabel('Displacement (mm)', fontsize=16)
+                ax.set_ylabel('Force (kN)', fontsize=16)
                 # ax.set_title(f'All Tests Force vs Displacement (Averaged across two sets) - Cycle {target_cycle}\n{filament_name}, SVF {svf}%',
-                #              fontsize=14, fontweight='bold')
+                #              fontsize=16, fontweight='bold')
                 # Merge cycle/test legend entries with loading/unloading arrow handles (if added)
                 handles, labels = ax.get_legend_handles_labels()
                 if hasattr(ax, '_hyst_dir_handles_added'):
@@ -2388,7 +2418,7 @@ def plot_cross_test_cycle_comparison(base_path, target_cycles=[1, 100, 1000]):
                         handles.append(lh); labels.append('Loading')
                     if 'Unloading' not in labels:
                         handles.append(uh); labels.append('Unloading')
-                ax.legend(handles, labels, fontsize=14, loc='best')
+                ax.legend(handles, labels, fontsize=16, loc='best')
                 ax.grid(True, alpha=0.3)
                 
                 # Add combination annotation
@@ -2523,8 +2553,8 @@ def plot_cross_test_peak_force_by_filament(base_path):
             continue
         averaged[key] = (cx, y)
 
-    # Arrange by filament -> SVF -> test
-    filaments = sorted({k[0] for k in averaged.keys()})
+    # Arrange by filament -> SVF -> test (maintain 87, 90, 95 order)
+    filaments = sorted({k[0] for k in averaged.keys()}, key=get_filament_order_key)
     if not filaments:
         print("  No cross-test data available for per-filament plots; skipping.")
         return
@@ -2576,9 +2606,9 @@ def plot_cross_test_peak_force_by_filament(base_path):
 
         name = get_filament_name(fil)
         ax.tick_params(axis='both', which='major', labelsize=14)
-        ax.set_xlabel('Cycle Number', fontsize=14)
-        ax.set_ylabel('Average Peak Force (kN)', fontsize=14)
-        # ax.set_title(f'Cross Test: {name} — All SVFs\nPeak Force vs Cycle', fontsize=14, fontweight='bold')
+        ax.set_xlabel('Cycle Number', fontsize=16)
+        ax.set_ylabel('Peak Force (kN)', fontsize=16)
+        # ax.set_title(f'Cross Test: {name} — All SVFs\nPeak Force vs Cycle', fontsize=16, fontweight='bold')
         if plotted:
             # Build separate legends: one mapping color->SVF, another mapping linestyle/marker->Test
             from matplotlib.lines import Line2D
@@ -2601,14 +2631,14 @@ def plot_cross_test_peak_force_by_filament(base_path):
             leg1 = ax.legend(
                 handles=svf_handles,
                 loc='upper right',
-                fontsize=14,
+                fontsize=16,
                 frameon=True,
             )
             ax.add_artist(leg1)
             ax.legend(
                 handles=test_handles,
                 loc='center right',
-                fontsize=14,
+                fontsize=16,
                 frameon=True,
             )
         ax.grid(True, alpha=0.3)
@@ -2687,6 +2717,20 @@ def plot_first_cycle_peak_force_histogram(csv_path):
             print("No data found for histogram creation.")
             return None
         
+        # Sort combinations by filament order (87, 90, 95) then by SVF
+        def get_filament_from_name(name):
+            if '87A TPU' in name:
+                return 87
+            elif 'TPU90' in name:
+                return 90
+            elif '95A TPU' in name:
+                return 95
+            else:
+                return 999  # Unknown
+        
+        stats_df['Filament_Number'] = stats_df['Filament_Name'].apply(get_filament_from_name)
+        stats_df = stats_df.sort_values(['Filament_Number', 'SVF_Percentage']).drop('Filament_Number', axis=1)
+        
         # Create the histogram plot
         fig, ax1 = plt.subplots(1, 1, figsize=(14, 8))
         
@@ -2722,14 +2766,14 @@ def plot_first_cycle_peak_force_histogram(csv_path):
         
         # Set up primary y-axis (force)
         ax1.tick_params(axis='both', which='major', labelsize=14)
-        ax1.set_xlabel('Filament-SVF Combinations', fontsize=14)
-        ax1.set_ylabel('Peak Force (kN)', fontsize=14)
+        ax1.set_xlabel('Filament-SVF Combinations', fontsize=16)
+        ax1.set_ylabel('Peak Force (kN)', fontsize=16)
         # ax1.set_title('Test 1 (First Week) First Cycle Peak Force Analysis\nPeak Force by Combination with Individual RSD Calculations', 
-        #              fontsize=14, fontweight='bold')
+        #              fontsize=16, fontweight='bold')
         ax1.set_xticks(x_pos)
         ax1.set_xticklabels(combinations, rotation=45, ha='right')
         ax1.grid(True, alpha=0.3, axis='y')
-        ax1.legend(loc='upper left', fontsize=14)
+        ax1.legend(loc='upper left', fontsize=16)
         
         # Create secondary y-axis for RSD
         ax2 = ax1.twinx()
@@ -2755,9 +2799,9 @@ def plot_first_cycle_peak_force_histogram(csv_path):
 
             # Add RSD value label
             ax2.annotate(f'{rsd:.1f}%', (x, rsd), textcoords="offset points", 
-                        xytext=(0,15), ha='center', fontsize=14, color='black')
+                        xytext=(0,15), ha='center', fontsize=16, color='black')
         ax2.tick_params(axis='both', which='major', labelsize=14)
-        ax2.set_ylabel('Relative Standard Deviation (%)', fontsize=14, color='black')
+        ax2.set_ylabel('Relative Standard Deviation (%)', fontsize=16, color='black')
         ax2.tick_params(axis='y', labelcolor='black')
         
         # Add custom legend for RSD visualization
@@ -2833,6 +2877,20 @@ def plot_cycle_peak_force_histogram(csv_path, cycle_num):
             print(f"No data found for cycle {cycle_num} histogram creation.")
             return None
 
+        # Sort combinations by filament order (87, 90, 95) then by SVF
+        def get_filament_from_name(name):
+            if '87A TPU' in name:
+                return 87
+            elif 'TPU90' in name:
+                return 90
+            elif '95A TPU' in name:
+                return 95
+            else:
+                return 999  # Unknown
+        
+        stats_df['Filament_Number'] = stats_df['Filament_Name'].apply(get_filament_from_name)
+        stats_df = stats_df.sort_values(['Filament_Number', 'SVF_Percentage']).drop('Filament_Number', axis=1)
+
         fig, ax1 = plt.subplots(1, 1, figsize=(14, 8))
         combinations = []
         mean_forces = []
@@ -2856,13 +2914,13 @@ def plot_cycle_peak_force_histogram(csv_path, cycle_num):
         #               fmt='none', color='black', capsize=5, capthick=2, zorder=3)
         # ax1.scatter(x_pos, mean_forces, color='black', s=30, zorder=4, label='Mean (± SD)')
         ax1.tick_params(axis='both', which='major', labelsize=14)
-        ax1.set_xlabel('Filament-SVF Combinations', fontsize=14)
-        ax1.set_ylabel('Peak Force (kN)', fontsize=14)
-        # ax1.set_title(f'Test 1 Cycle {cycle_num} Peak Force Analysis\nPeak Force by Combination with Individual RSD Calculations', fontsize=14, fontweight='bold')
+        ax1.set_xlabel('Filament-SVF Combinations', fontsize=16)
+        ax1.set_ylabel('Peak Force (kN)', fontsize=16)
+        # ax1.set_title(f'Test 1 Cycle {cycle_num} Peak Force Analysis\nPeak Force by Combination with Individual RSD Calculations', fontsize=16, fontweight='bold')
         ax1.set_xticks(x_pos)
         ax1.set_xticklabels(combinations, rotation=45, ha='right')
         ax1.grid(True, alpha=0.3, axis='y')
-        ax1.legend(loc='upper left', fontsize=14)
+        ax1.legend(loc='upper left', fontsize=16)
 
         ax2 = ax1.twinx()
         colors = plt.cm.Set3(np.linspace(0, 1, len(combinations)))
@@ -2874,12 +2932,12 @@ def plot_cycle_peak_force_histogram(csv_path, cycle_num):
                 rsd_reprint = ((reprint - mean_val) / mean_val) * 100 + rsd
                 ax2.plot([x-0.1, x+0.1], [rsd_normal, rsd_reprint], color='black', linewidth=2, alpha=0.7, zorder=2, marker='o')
             ax2.annotate(f'{rsd:.1f}%', (x, rsd), textcoords="offset points", 
-                         xytext=(0,15), ha='center', fontsize=14, color='black')
+                         xytext=(0,15), ha='center', fontsize=16, color='black')
         ax2.tick_params(axis='both', which='major', labelsize=14)
-        ax2.set_ylabel('Relative Standard Deviation (%)', fontsize=14, color='black')
+        ax2.set_ylabel('Relative Standard Deviation (%)', fontsize=16, color='black')
         ax2.tick_params(axis='y', labelcolor='black')
         from matplotlib.lines import Line2D
-        # ax2.legend(handles=[Line2D([0], [0], color='gray', linewidth=2, alpha=0.7, label='RSD Chain (Normal ↔ Reprint)')], loc='upper right', fontsize=14)
+        # ax2.legend(handles=[Line2D([0], [0], color='gray', linewidth=2, alpha=0.7, label='RSD Chain (Normal ↔ Reprint)')], loc='upper right', fontsize=16)
 
         plt.tight_layout()
         output_path = Path(f'Test_1_Cycle_{cycle_num}_Peak_Force_Histogram.png')
@@ -3017,8 +3075,8 @@ def plot_test1_average_energy_loss_histogram(base_path, cycles=[1, 100, 1000]):
         print("  No energy loss data found for Test 1; skipping plot.")
         return None
 
-    # Sort combinations for stable order
-    combos = sorted(list(data.keys()))
+    # Sort combinations for stable order (maintain 87, 90, 95 order)
+    combos = sorted(list(data.keys()), key=get_filament_order_key)
     # Compute averages per cycle per combo
     avg_matrix = []  # rows per cycle in 'cycles' order; columns per combo
     for c in cycles:
@@ -3048,10 +3106,10 @@ def plot_test1_average_energy_loss_histogram(base_path, cycles=[1, 100, 1000]):
     ax.tick_params(axis='both', which='major', labelsize=14)
     ax.set_xticks(x)
     ax.set_xticklabels(combo_labels, rotation=45, ha='right')
-    ax.set_xlabel('Filament–SVF Combinations', fontsize=14)
-    ax.set_ylabel('Average Energy Loss (J)', fontsize=14)
-    # ax.set_title('Test 1 Average Energy Loss per Combination\nCycles 1, 100, and 1000 (mean across samples) — 1 kN·mm = 1 J', fontsize=14)
-    ax.legend(fontsize=14)
+    ax.set_xlabel('Filament–SVF Combinations', fontsize=16)
+    ax.set_ylabel('Average Energy Loss (J)', fontsize=16)
+    # ax.set_title('Test 1 Average Energy Loss per Combination\nCycles 1, 100, and 1000 (mean across samples) — 1 kN·mm = 1 J', fontsize=16)
+    ax.legend(fontsize=16)
     ax.grid(True, axis='y', alpha=0.3)
 
     plt.tight_layout()
@@ -3114,7 +3172,7 @@ def plot_cross_test_first_cycle_energy_loss_histogram(base_path, cycle=1):
         print("  No energy loss data found across tests; histogram skipped.")
         return None
 
-    combos = sorted(data.keys())
+    combos = sorted(data.keys(), key=get_filament_order_key)
     tests = list(week_map.keys())
 
     # Compute mean matrix: rows = tests, cols = combos
@@ -3144,10 +3202,10 @@ def plot_cross_test_first_cycle_energy_loss_histogram(base_path, cycle=1):
     ax.set_xticks(x)
     ax.set_xticklabels(combo_labels, rotation=45, ha='right')
     ax.tick_params(axis='both', which='major', labelsize=14)
-    ax.set_xlabel('Filament–SVF Combinations', fontsize=14)
-    ax.set_ylabel('First Cycle Energy Loss (J)', fontsize=14)
-    # ax.set_title('Cross-Test First Cycle Energy Loss\n(Mean per Test; 1 kN·mm = 1 J)', fontsize=14)
-    ax.legend(fontsize=14)
+    ax.set_xlabel('Filament–SVF Combinations', fontsize=16)
+    ax.set_ylabel('First Cycle Energy Loss (J)', fontsize=16)
+    # ax.set_title('Cross-Test First Cycle Energy Loss\n(Mean per Test; 1 kN·mm = 1 J)', fontsize=16)
+    ax.legend(fontsize=16)
     ax.grid(True, axis='y', alpha=0.3)
 
     plt.tight_layout()
@@ -3203,7 +3261,7 @@ def plot_cross_test_cycle_energy_loss_histogram(base_path, cycle):
         print(f"  No energy loss data found across tests for cycle {cycle}; histogram skipped.")
         return None
 
-    combos = sorted(data.keys())
+    combos = sorted(data.keys(), key=get_filament_order_key)
     tests = list(week_map.keys())
     mean_matrix = []
     for test in tests:
@@ -3229,10 +3287,10 @@ def plot_cross_test_cycle_energy_loss_histogram(base_path, cycle):
     ax.set_xticks(x)
     ax.set_xticklabels(combo_labels, rotation=45, ha='right')
     ax.tick_params(axis='both', which='major', labelsize=14)
-    ax.set_xlabel('Filament–SVF Combinations', fontsize=14)
-    ax.set_ylabel(f'Cycle {cycle} Energy Loss (J)', fontsize=14)
-    # ax.set_title(f'Cross-Test Cycle {cycle} Energy Loss (Mean per Test)', fontsize=14)
-    ax.legend(fontsize=14)
+    ax.set_xlabel('Filament–SVF Combinations', fontsize=16)
+    ax.set_ylabel(f'Cycle {cycle} Energy Loss (J)', fontsize=16)
+    # ax.set_title(f'Cross-Test Cycle {cycle} Energy Loss (Mean per Test)', fontsize=16)
+    ax.legend(fontsize=16)
     ax.grid(True, axis='y', alpha=0.3)
 
     plt.tight_layout()
@@ -3297,7 +3355,7 @@ def plot_test_average_energy_loss_histogram(base_path, test_name, cycles=[1, 100
         print(f"  No energy loss data found for {test_name}; skipping plot.")
         return None
 
-    combos = sorted(list(data.keys()))
+    combos = sorted(list(data.keys()), key=get_filament_order_key)
     avg_matrix = []
     for c in cycles:
         row = []
@@ -3322,9 +3380,9 @@ def plot_test_average_energy_loss_histogram(base_path, test_name, cycles=[1, 100
     ax.tick_params(axis='both', which='major', labelsize=14)
     ax.set_xticks(x)
     ax.set_xticklabels(combo_labels, rotation=45, ha='right')
-    ax.set_xlabel('Filament–SVF Combinations', fontsize=14)
-    ax.set_ylabel('Average Energy Loss (J)', fontsize=14)
-    ax.legend(fontsize=14)
+    ax.set_xlabel('Filament–SVF Combinations', fontsize=16)
+    ax.set_ylabel('Average Energy Loss (J)', fontsize=16)
+    ax.legend(fontsize=16)
     ax.grid(True, axis='y', alpha=0.3)
 
     plt.tight_layout()
@@ -3672,14 +3730,14 @@ def plot_all_combinations_peak_force_vs_cycle(data_by_combination, test_name):
             ax.plot(cycles, forces, linewidth=2.6, color='black', label='TPU95A SVF 50%', alpha=1.0)
             plot_created = True
 
-    ax.set_xlabel('Cycle Number', fontsize=14)
-    ax.set_ylabel('Average Peak Force (kN)', fontsize=14)
+    ax.set_xlabel('Cycle Number', fontsize=16)
+    ax.set_ylabel('Peak Force (kN)', fontsize=16)
     ax.tick_params(axis='both', which='major', labelsize=14)
-    ax.set_title(f'{test_name} - All Combinations\nPeak Force vs Cycle', fontsize=14, fontweight='bold')
+    ax.set_title(f'{test_name} - All Combinations\nPeak Force vs Cycle', fontsize=16)
     if plot_created:
         n_items = len(group_keys)
         ncol = 1 if n_items <= 12 else 2 if n_items <= 24 else 3
-        ax.legend(loc='upper right', fontsize=14, ncol=ncol)
+        ax.legend(loc='upper right', fontsize=16, ncol=ncol)
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
 
