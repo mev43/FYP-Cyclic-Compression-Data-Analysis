@@ -51,13 +51,13 @@ def _annotate_hysteresis_direction(ax, x, y, color=None, load_label='Loading', u
         ax.annotate('', xy=(ux1, uy1), xytext=(ux0, uy0), arrowprops=arrow_style)
 
         # Add legend arrow symbol handles once per axes (using Unicode arrow markers for reliability)
-        if not hasattr(ax, '_hyst_dir_handles_added'):
-            from matplotlib.lines import Line2D
-            loading_handle = Line2D([0], [0], marker=r'$\leftarrow$', markersize=18,
-                                    linestyle='None', label=load_label, color='k')
-            unloading_handle = Line2D([0], [0], marker=r'$\rightarrow$', markersize=18,
-                                      linestyle='None', label=unload_label, color='k')
-            ax._hyst_dir_handles_added = (loading_handle, unloading_handle)
+        # if not hasattr(ax, '_hyst_dir_handles_added'):
+        #     from matplotlib.lines import Line2D
+        #     loading_handle = Line2D([0], [0], marker=r'$\leftarrow$', markersize=18,
+        #                             linestyle='None', label=load_label, color='k')
+        #     unloading_handle = Line2D([0], [0], marker=r'$\rightarrow$', markersize=18,
+        #                               linestyle='None', label=unload_label, color='k')
+        #     ax._hyst_dir_handles_added = (loading_handle, unloading_handle)
     except Exception:
         pass
 
@@ -513,75 +513,40 @@ def plot_specific_cycles_force_displacement(data_by_combination, test_name, cycl
     Only plot averages with normalized displacement (0 to -6mm range)
     """
     def average_hysteresis_loops(displacements_list, forces_list):
-        """Helper function to properly average hysteresis loops by preserving temporal order"""
+        """Average pre-shifted hysteresis loops (all already aligned using cycle 1 baseline).
+
+        NOTE: Per user request, displacement/force zeroing is derived ONLY from the FIRST CYCLE
+        of each specimen (normal / reprint). The SAME offsets are then applied to cycles 100 & 1000,
+        so later cycles will generally NOT start at (0,0). Therefore this function MUST NOT apply
+        any additional per-series first-point shifting; it only cleans and averages."""
         if not displacements_list or not forces_list:
             return None, None
-        
-        # Process each dataset to clean and normalize
+
         processed_data = []
         for disp, force in zip(displacements_list, forces_list):
-            # Remove any NaN values
             valid_mask = ~(np.isnan(disp) | np.isnan(force))
             disp_clean = disp[valid_mask]
             force_clean = force[valid_mask]
-            
-            if len(disp_clean) < 10:  # Need sufficient points for a hysteresis loop
+            if len(disp_clean) < 10:
                 continue
-            
-            # Normalize displacement to start at 0 and go negative (compression)
-            # Find the minimum displacement (most compressed point)
-            min_disp = np.min(disp_clean)
-            max_disp = np.max(disp_clean)
-            
-            # Shift displacement so the FIRST SAMPLE is at 0 mm (temporal start reference)
-            # This replaces previous normalization that used max_disp.
-            first_disp = disp_clean[0]
-            disp_normalized = disp_clean - first_disp
-            
-            # Scale if needed to get approximately -6mm range
-            disp_range = abs(min_disp - max_disp)
-            # if disp_range > 0.1:  # Avoid division by zero
-            #     target_range = 6.0  # Target 6mm compression range
-            #     scale_factor = target_range / disp_range
-            #     disp_normalized = disp_normalized * scale_factor
-            
-            # Shift force so first value is 0 kN
-            if len(force_clean) > 0:
-                force_shifted = force_clean - force_clean[0]
-            else:
-                force_shifted = force_clean
-            processed_data.append((disp_normalized, force_shifted))
-        
-        if len(processed_data) < 1:
+            processed_data.append((disp_clean, force_clean))  # already baseline shifted
+
+        if not processed_data:
             return None, None
-        
-        # If we only have one dataset, return it as is
         if len(processed_data) == 1:
             return processed_data[0]
-        
-        # For multiple datasets, use time-based averaging
-        # Find the dataset with the most points to use as reference
-        ref_idx = np.argmax([len(data[0]) for data in processed_data])
+
+        ref_idx = np.argmax([len(d[0]) for d in processed_data])
         ref_disp, ref_force = processed_data[ref_idx]
-        
-        # For other datasets, interpolate based on temporal progression
+        ref_time = np.linspace(0, 1, len(ref_force))
         all_forces = [ref_force]
-        
         for i, (disp, force) in enumerate(processed_data):
             if i == ref_idx:
                 continue
-                
-            # Create normalized time parameter for both datasets
-            ref_time = np.linspace(0, 1, len(ref_force))
             data_time = np.linspace(0, 1, len(force))
-            
-            # Interpolate this dataset's force to match reference timing
             interp_force = np.interp(ref_time, data_time, force)
             all_forces.append(interp_force)
-        
-        # Average all forces at corresponding time points
         avg_force = np.mean(all_forces, axis=0)
-        
         return ref_disp, avg_force
     
     # Define colors for each cycle
@@ -593,6 +558,17 @@ def plot_specific_cycles_force_displacement(data_by_combination, test_name, cycl
         
         fig, ax = plt.subplots(1, 1, figsize=(10, 8))
         
+        # Pre-compute baseline (cycle 1 first sample) for each available test set once
+        baselines = {}
+        for ttype in ['normal', 'reprint']:
+            if ttype in combo_data and combo_data[ttype] and 'full_data' in combo_data[ttype]:
+                df_base = combo_data[ttype]['full_data']
+                c1 = df_base[df_base['Total Cycles'] == 1]
+                if not c1.empty:
+                    baselines[ttype] = (
+                        c1['Displacement(Linear:Digital Position) (mm)'].values[0],
+                        c1['Force(Linear:Load) (kN)'].values[0]
+                    )
         # Plot each cycle on the same axes
         for target_cycle in cycles_of_interest:
             # Collect data for this cycle from both normal and reprint tests
@@ -604,8 +580,13 @@ def plot_specific_cycles_force_displacement(data_by_combination, test_name, cycl
                 df_normal = combo_data['normal']['full_data']
                 cycle_data = df_normal[df_normal['Total Cycles'] == target_cycle]
                 if not cycle_data.empty:
-                    displacement = cycle_data['Displacement(Linear:Digital Position) (mm)'].values
-                    force = cycle_data['Force(Linear:Load) (kN)'].values
+                    displacement = cycle_data['Displacement(Linear:Digital Position) (mm)'].values.copy()
+                    force = cycle_data['Force(Linear:Load) (kN)'].values.copy()
+                    # Apply baseline from cycle 1 (if available) instead of per-cycle zeroing
+                    if 'normal' in baselines:
+                        d0, f0 = baselines['normal']
+                        displacement = displacement - d0
+                        force = force - f0
                     if len(displacement) > 5 and len(force) > 5:  # Ensure sufficient data
                         displacements_list.append(displacement)
                         forces_list.append(force)
@@ -615,8 +596,12 @@ def plot_specific_cycles_force_displacement(data_by_combination, test_name, cycl
                 df_reprint = combo_data['reprint']['full_data']
                 cycle_data = df_reprint[df_reprint['Total Cycles'] == target_cycle]
                 if not cycle_data.empty:
-                    displacement = cycle_data['Displacement(Linear:Digital Position) (mm)'].values
-                    force = cycle_data['Force(Linear:Load) (kN)'].values
+                    displacement = cycle_data['Displacement(Linear:Digital Position) (mm)'].values.copy()
+                    force = cycle_data['Force(Linear:Load) (kN)'].values.copy()
+                    if 'reprint' in baselines:
+                        d0, f0 = baselines['reprint']
+                        displacement = displacement - d0
+                        force = force - f0
                     if len(displacement) > 5 and len(force) > 5:  # Ensure sufficient data
                         displacements_list.append(displacement)
                         forces_list.append(force)
@@ -952,74 +937,33 @@ def plot_specific_cycles_by_vs_groups(data_by_combination, vs_groups, averaged_c
         print(f"❌ Failed to create base VS directory: {e}")
         return
     def average_hysteresis_loops(displacements_list, forces_list):
-        """Helper function to properly average hysteresis loops by preserving temporal order"""
+        """Average hysteresis loops already baseline-shifted using cycle 1 offsets.
+        Do NOT apply per-loop first point normalization here."""
         if not displacements_list or not forces_list:
             return None, None
-        
-        # Process each dataset to clean and normalize
         processed_data = []
         for disp, force in zip(displacements_list, forces_list):
-            # Remove any NaN values
             valid_mask = ~(np.isnan(disp) | np.isnan(force))
             disp_clean = disp[valid_mask]
             force_clean = force[valid_mask]
-            
-            if len(disp_clean) < 10:  # Need sufficient points for a hysteresis loop
+            if len(disp_clean) < 10:
                 continue
-            
-            # Normalize displacement to start at 0 and go negative (compression)
-            # Find the minimum displacement (most compressed point)
-            min_disp = np.min(disp_clean)
-            max_disp = np.max(disp_clean)
-            
-            # First-point anchoring: shift so the very first sample is 0 mm
-            first_disp = disp_clean[0]
-            disp_normalized = disp_clean - first_disp
-            
-            # Scale if needed to get approximately -6mm range
-            disp_range = abs(min_disp - max_disp)
-            # if disp_range > 0.1:  # Avoid division by zero
-            #     target_range = 6.0  # Target 6mm compression range
-            #     scale_factor = target_range / disp_range
-            #     disp_normalized = disp_normalized * scale_factor
-            
-            # Shift force so first value is 0 kN
-            if len(force_clean) > 0:
-                force_shifted = force_clean - force_clean[0]
-            else:
-                force_shifted = force_clean
-            processed_data.append((disp_normalized, force_shifted))
-        
-        if len(processed_data) < 1:
+            processed_data.append((disp_clean, force_clean))
+        if not processed_data:
             return None, None
-        
-        # If we only have one dataset, return it as is
         if len(processed_data) == 1:
             return processed_data[0]
-        
-        # For multiple datasets, use time-based averaging
-        # Find the dataset with the most points to use as reference
-        ref_idx = np.argmax([len(data[0]) for data in processed_data])
+        ref_idx = np.argmax([len(d[0]) for d in processed_data])
         ref_disp, ref_force = processed_data[ref_idx]
-        
-        # For other datasets, interpolate based on temporal progression
+        ref_time = np.linspace(0, 1, len(ref_force))
         all_forces = [ref_force]
-        
         for i, (disp, force) in enumerate(processed_data):
             if i == ref_idx:
                 continue
-                
-            # Create normalized time parameter for both datasets
-            ref_time = np.linspace(0, 1, len(ref_force))
             data_time = np.linspace(0, 1, len(force))
-            
-            # Interpolate this dataset's force to match reference timing
             interp_force = np.interp(ref_time, data_time, force)
             all_forces.append(interp_force)
-        
-        # Average all forces at corresponding time points
         avg_force = np.mean(all_forces, axis=0)
-        
         return ref_disp, avg_force
     
     for group_idx, vs_group in enumerate(vs_groups):
@@ -1079,25 +1023,51 @@ def plot_specific_cycles_by_vs_groups(data_by_combination, vs_groups, averaged_c
                             all_displacements_list = []
                             all_forces_list = []
                             
+                            # Pre-compute baselines (cycle 1 first sample) per specimen (normal/reprint) once
+                            specimen_baselines = {}
                             for orig_combination_key in avg_data['original_combinations']:
                                 if orig_combination_key in data_by_combination:
                                     orig_combo_data = data_by_combination[orig_combination_key]
-                                    
+                                    for ttype in ['normal', 'reprint']:
+                                        if ttype in orig_combo_data and orig_combo_data[ttype] and 'full_data' in orig_combo_data[ttype]:
+                                            df_full = orig_combo_data[ttype]['full_data']
+                                            c1 = df_full[df_full['Total Cycles'] == 1]
+                                            if not c1.empty:
+                                                specimen_baselines[(orig_combination_key, ttype)] = (
+                                                    c1['Displacement(Linear:Digital Position) (mm)'].values[0],
+                                                    c1['Force(Linear:Load) (kN)'].values[0]
+                                                )
+                            # Collect loops with baseline shifts from cycle 1 (not per cycle)
+                            for orig_combination_key in avg_data['original_combinations']:
+                                if orig_combination_key in data_by_combination:
+                                    orig_combo_data = data_by_combination[orig_combination_key]
                                     # Get normal test data
                                     if 'normal' in orig_combo_data and orig_combo_data['normal'] and 'full_data' in orig_combo_data['normal']:
                                         normal_df = orig_combo_data['normal']['full_data']
                                         cycle_data = normal_df[normal_df['Total Cycles'] == target_cycle]
                                         if not cycle_data.empty:
-                                            all_displacements_list.append(cycle_data['Displacement(Linear:Digital Position) (mm)'].values)
-                                            all_forces_list.append(cycle_data['Force(Linear:Load) (kN)'].values)
+                                            disp_vals = cycle_data['Displacement(Linear:Digital Position) (mm)'].values.copy()
+                                            force_vals = cycle_data['Force(Linear:Load) (kN)'].values.copy()
+                                            if (orig_combination_key, 'normal') in specimen_baselines:
+                                                d0, f0 = specimen_baselines[(orig_combination_key, 'normal')]
+                                                disp_vals = disp_vals - d0
+                                                force_vals = force_vals - f0
+                                            all_displacements_list.append(disp_vals)
+                                            all_forces_list.append(force_vals)
                                     
                                     # Get reprint test data
                                     if 'reprint' in orig_combo_data and orig_combo_data['reprint'] and 'full_data' in orig_combo_data['reprint']:
                                         reprint_df = orig_combo_data['reprint']['full_data']
                                         cycle_data = reprint_df[reprint_df['Total Cycles'] == target_cycle]
                                         if not cycle_data.empty:
-                                            all_displacements_list.append(cycle_data['Displacement(Linear:Digital Position) (mm)'].values)
-                                            all_forces_list.append(cycle_data['Force(Linear:Load) (kN)'].values)
+                                            disp_vals = cycle_data['Displacement(Linear:Digital Position) (mm)'].values.copy()
+                                            force_vals = cycle_data['Force(Linear:Load) (kN)'].values.copy()
+                                            if (orig_combination_key, 'reprint') in specimen_baselines:
+                                                d0, f0 = specimen_baselines[(orig_combination_key, 'reprint')]
+                                                disp_vals = disp_vals - d0
+                                                force_vals = force_vals - f0
+                                            all_displacements_list.append(disp_vals)
+                                            all_forces_list.append(force_vals)
                             
                             # Calculate and plot average force-displacement curve for this averaged combination
                             if all_displacements_list and all_forces_list:
@@ -1180,83 +1150,72 @@ def plot_pairwise_force_displacement_overlaid(data_by_combination, test_name, pa
     """
     # Reuse averaging helper (time-based interpolation + normalization) from VS-group plots
     def average_hysteresis_loops(displacements_list, forces_list):
+        # Input loops are already baseline shifted using each specimen's cycle 1 first sample.
         if not displacements_list or not forces_list:
             return None, None
-
-        processed_data = []
-        for disp, force in zip(displacements_list, forces_list):
-            valid_mask = ~(np.isnan(disp) | np.isnan(force))
-            disp_clean = disp[valid_mask]
-            force_clean = force[valid_mask]
-
-            if len(disp_clean) < 10:
+        processed = []
+        for d, f in zip(displacements_list, forces_list):
+            mask = ~(np.isnan(d) | np.isnan(f))
+            d2 = d[mask]; f2 = f[mask]
+            if len(d2) < 10:
                 continue
-
-            # First-point anchoring (was max-disp anchoring)
-            min_disp = np.min(disp_clean)
-            max_disp = np.max(disp_clean)
-            first_disp = disp_clean[0]
-            disp_normalized = disp_clean - first_disp
-
-            disp_range = abs(min_disp - max_disp)
-            # if disp_range > 0.1:
-            #     target_range = 6.0
-            #     scale_factor = target_range / disp_range
-            #     disp_normalized = disp_normalized * scale_factor
-
-            # Shift force so first value is 0 kN
-            if len(force_clean) > 0:
-                force_shifted = force_clean - force_clean[0]
-            else:
-                force_shifted = force_clean
-            processed_data.append((disp_normalized, force_shifted))
-
-        if len(processed_data) < 1:
+            processed.append((d2, f2))
+        if not processed:
             return None, None
-
-        if len(processed_data) == 1:
-            return processed_data[0]
-
-        # Time-based averaging on the longest series
-        ref_idx = np.argmax([len(data[0]) for data in processed_data])
-        ref_disp, ref_force = processed_data[ref_idx]
-        all_forces = [ref_force]
-        for i, (disp, force) in enumerate(processed_data):
+        if len(processed) == 1:
+            return processed[0]
+        ref_idx = np.argmax([len(p[0]) for p in processed])
+        ref_disp, ref_force = processed[ref_idx]
+        ref_time = np.linspace(0, 1, len(ref_force))
+        forces_interp = [ref_force]
+        for i, (d, f) in enumerate(processed):
             if i == ref_idx:
                 continue
-            ref_time = np.linspace(0, 1, len(ref_force))
-            data_time = np.linspace(0, 1, len(force))
-            interp_force = np.interp(ref_time, data_time, force)
-            all_forces.append(interp_force)
-        avg_force = np.mean(all_forces, axis=0)
+            t = np.linspace(0, 1, len(f))
+            forces_interp.append(np.interp(ref_time, t, f))
+        avg_force = np.mean(forces_interp, axis=0)
         return ref_disp, avg_force
 
     # Helper: collect all loops (normal + reprint across VS buckets) for a specific combination and cycle
     def collect_combo_cycle_loops(filament, svf, target_cycle):
-        disps, forces = [] , []
+        disps, forces = [], []
         for _, combo_data in data_by_combination.items():
             if combo_data.get('filament') != filament or combo_data.get('svf') != svf:
                 continue
+            baselines = {}
+            for ttype in ['normal', 'reprint']:
+                if ttype in combo_data and combo_data[ttype] and 'full_data' in combo_data[ttype]:
+                    df_full = combo_data[ttype]['full_data']
+                    c1 = df_full[df_full['Total Cycles'] == 1]
+                    if not c1.empty:
+                        baselines[ttype] = (
+                            c1['Displacement(Linear:Digital Position) (mm)'].values[0],
+                            c1['Force(Linear:Load) (kN)'].values[0]
+                        )
             # Normal
             if 'normal' in combo_data and combo_data['normal'] and 'full_data' in combo_data['normal']:
                 df = combo_data['normal']['full_data']
                 cy = df[df['Total Cycles'] == target_cycle]
                 if not cy.empty:
-                    d = cy['Displacement(Linear:Digital Position) (mm)'].values
-                    f = cy['Force(Linear:Load) (kN)'].values
+                    d = cy['Displacement(Linear:Digital Position) (mm)'].values.copy()
+                    f = cy['Force(Linear:Load) (kN)'].values.copy()
+                    if 'normal' in baselines:
+                        d0, f0 = baselines['normal']
+                        d = d - d0; f = f - f0
                     if len(d) > 5 and len(f) > 5:
-                        disps.append(d)
-                        forces.append(f)
+                        disps.append(d); forces.append(f)
             # Reprint
             if 'reprint' in combo_data and combo_data['reprint'] and 'full_data' in combo_data['reprint']:
                 df = combo_data['reprint']['full_data']
                 cy = df[df['Total Cycles'] == target_cycle]
                 if not cy.empty:
-                    d = cy['Displacement(Linear:Digital Position) (mm)'].values
-                    f = cy['Force(Linear:Load) (kN)'].values
+                    d = cy['Displacement(Linear:Digital Position) (mm)'].values.copy()
+                    f = cy['Force(Linear:Load) (kN)'].values.copy()
+                    if 'reprint' in baselines:
+                        d0, f0 = baselines['reprint']
+                        d = d - d0; f = f - f0
                     if len(d) > 5 and len(f) > 5:
-                        disps.append(d)
-                        forces.append(f)
+                        disps.append(d); forces.append(f)
         return disps, forces
 
     # Output directory
