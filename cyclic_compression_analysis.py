@@ -2797,9 +2797,10 @@ def plot_first_cycle_peak_force_histogram(csv_path):
             ax2.plot([x-0.1, x+0.1], [rsd_normal, rsd_reprint], 
                     color='black', linewidth=2, alpha=0.7, zorder=2, marker='o')
 
-            # Add RSD value label
-            ax2.annotate(f'{rsd:.1f}%', (x, rsd), textcoords="offset points", 
-                        xytext=(0,15), ha='center', fontsize=16, color='black')
+            # Add RSD value label above the highest point of the line
+            max_rsd_point = max(rsd_normal, rsd_reprint)
+            ax2.annotate(f'{rsd:.1f}%', (x, max_rsd_point), textcoords="offset points", 
+                        xytext=(0,10), ha='center', fontsize=14, color='black')
         ax2.tick_params(axis='both', which='major', labelsize=14)
         ax2.set_ylabel('Relative Standard Deviation (%)', fontsize=16, color='black')
         ax2.tick_params(axis='y', labelcolor='black')
@@ -2931,8 +2932,14 @@ def plot_cycle_peak_force_histogram(csv_path, cycle_num):
                 rsd_normal = ((normal - mean_val) / mean_val) * 100 + rsd
                 rsd_reprint = ((reprint - mean_val) / mean_val) * 100 + rsd
                 ax2.plot([x-0.1, x+0.1], [rsd_normal, rsd_reprint], color='black', linewidth=2, alpha=0.7, zorder=2, marker='o')
-            ax2.annotate(f'{rsd:.1f}%', (x, rsd), textcoords="offset points", 
-                         xytext=(0,15), ha='center', fontsize=16, color='black')
+                # Add RSD value label above the highest point of the line
+                max_rsd_point = max(rsd_normal, rsd_reprint)
+                ax2.annotate(f'{rsd:.1f}%', (x, max_rsd_point), textcoords="offset points", 
+                             xytext=(0,10), ha='center', fontsize=14, color='black')
+            else:
+                # If mean_val is 0, just annotate at the rsd value
+                ax2.annotate(f'{rsd:.1f}%', (x, rsd), textcoords="offset points", 
+                             xytext=(0,10), ha='center', fontsize=14, color='black')
         ax2.tick_params(axis='both', which='major', labelsize=14)
         ax2.set_ylabel('Relative Standard Deviation (%)', fontsize=16, color='black')
         ax2.tick_params(axis='y', labelcolor='black')
