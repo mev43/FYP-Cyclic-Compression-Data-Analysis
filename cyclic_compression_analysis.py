@@ -12,6 +12,47 @@ from scipy import stats
 warnings.filterwarnings('ignore')
 
 # -------------------------------------------------------------
+# Helper: add cycle trend arrow (from earliest to latest cycle)
+# -------------------------------------------------------------
+def _add_cycle_trend_arrow(ax, centroids, color='black'):
+    """Overlay an arrow indicating overall cycle trend across multiple hysteresis loops.
+
+    centroids: list of (x_mean, y_mean, cycle_number) tuples in chronological order.
+    Draws a single arrow from the first centroid to the last, places label 'Cycle Trend'.
+    If there are < 2 centroids or they collapse to a point, function silently returns.
+    """
+    try:
+        if not centroids or len(centroids) < 2:
+            return
+        # Ensure sorted by cycle number (chronological)
+        centroids_sorted = sorted(centroids, key=lambda t: t[2])
+        (x0, y0, _), (x1, y1, _) = centroids_sorted[0], centroids_sorted[-1]
+        if not (np.isfinite(x0) and np.isfinite(y0) and np.isfinite(x1) and np.isfinite(y1)):
+            return
+        if abs(x0 - x1) < 1e-9 and abs(y0 - y1) < 1e-9:
+            return
+        arrowprops = dict(arrowstyle='->', color=color, lw=2.5, shrinkA=0, shrinkB=0,
+                          mutation_scale=18, alpha=0.85)
+        ax.annotate('', xy=(x1, y1), xytext=(x0, y0), arrowprops=arrowprops)
+        # Place label near 60% along arrow vector with slight normal offset
+        frac = 0.6
+        xm = x0 + frac * (x1 - x0)
+        ym = y0 + frac * (y1 - y1 if True else y1 - y0)  # keep original y0->y1 slope
+        # compute small perpendicular offset for readability
+        dx = x1 - x0; dy = y1 - y0
+        norm = np.hypot(dx, dy)
+        if norm > 0:
+            nx = -dy / norm; ny = dx / norm
+        else:
+            nx = 0; ny = 0
+        xm_off = xm + 0.05 * nx * norm
+        ym_off = ym + 0.05 * ny * norm
+        ax.text(xm_off, ym_off, 'Cycle Trend', fontsize=12, fontweight='bold', color=color,
+                ha='center', va='center', bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
+    except Exception:
+        pass
+
+# -------------------------------------------------------------
 # Helper: annotate loading / unloading direction on hysteresis
 # -------------------------------------------------------------
 def _annotate_hysteresis_direction(ax, x, y, color=None, load_label='Loading', unload_label='Unloading'):
@@ -557,6 +598,7 @@ def plot_specific_cycles_force_displacement(data_by_combination, test_name, cycl
         filament, svf, vs = combo_data['filament'], combo_data['svf'], combo_data['vs']
         
         fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+        cycle_centroids = []  # (x_mean, y_mean, cycle_number)
         
         # Pre-compute baseline (cycle 1 first sample) for each available test set once
         baselines = {}
@@ -627,6 +669,12 @@ def plot_specific_cycles_force_displacement(data_by_combination, test_name, cycl
                         )
                     except Exception:
                         pass
+                    # centroid (simple mean) for trend arrow
+                    try:
+                        if len(avg_disp) > 5:
+                            cycle_centroids.append((float(np.mean(avg_disp)), float(np.mean(avg_force)), int(target_cycle)))
+                    except Exception:
+                        pass
                     
         ax.tick_params(axis='both', which='major', labelsize=14)
         ax.set_xlabel('Displacement (mm)', fontsize=14)
@@ -646,6 +694,9 @@ def plot_specific_cycles_force_displacement(data_by_combination, test_name, cycl
         # Set x-axis to show compression (negative values)
         ax.set_xlim(-7, 1)  # Show from -7mm to +1mm for better visualization
         
+        # Add trend arrow if multiple cycles
+        if len(cycle_centroids) >= 2:
+            _add_cycle_trend_arrow(ax, cycle_centroids, color='black')
         plt.tight_layout()
         
         # Save individual combination plot with Filament and SVF identification
@@ -1239,6 +1290,7 @@ def plot_pairwise_force_displacement_overlaid(data_by_combination, test_name, pa
         labelB = f"{get_filament_name(f2)} SVF {s2}%"
 
         plotted_any = False
+        centroids_all_cycles = []  # accumulate average centroid per cycle (across both combinations if present)
 
         for cyc in cycles_of_interest:
             # Combo A
@@ -1275,6 +1327,20 @@ def plot_pairwise_force_displacement_overlaid(data_by_combination, test_name, pa
                     pass
                 plotted_any = True
 
+            # Derive centroid for trend arrow (average of available combo centroids this cycle)
+            try:
+                centroids_cycle = []
+                if avg_dA is not None and avg_fA is not None and len(avg_dA) > 5:
+                    centroids_cycle.append((float(np.mean(avg_dA)), float(np.mean(avg_fA))))
+                if avg_dB is not None and avg_fB is not None and len(avg_dB) > 5:
+                    centroids_cycle.append((float(np.mean(avg_dB)), float(np.mean(avg_fB))))
+                if centroids_cycle:
+                    xm = float(np.mean([c[0] for c in centroids_cycle]))
+                    ym = float(np.mean([c[1] for c in centroids_cycle]))
+                    centroids_all_cycles.append((xm, ym, int(cyc)))
+            except Exception:
+                pass
+
         if plotted_any:
             ax.tick_params(axis='both', which='major', labelsize=14)
             ax.set_xlabel('Displacement (mm)', fontsize=14)
@@ -1300,6 +1366,8 @@ def plot_pairwise_force_displacement_overlaid(data_by_combination, test_name, pa
             #         bbox=dict(boxstyle='round,pad=0.5', facecolor='lightcyan', alpha=0.9),
             #         verticalalignment='top', fontsize=10, fontweight='bold')
             ax.set_xlim(-7, 1)
+            if len(centroids_all_cycles) >= 2:
+                _add_cycle_trend_arrow(ax, centroids_all_cycles, color='black')
             plt.tight_layout()
 
             fname = f"{test_name}_{get_filament_name(f1)}_SVF_{s1}_vs_{get_filament_name(f2)}_SVF_{s2}_force_displacement_overlaid_cycles.png"
