@@ -1562,42 +1562,63 @@ def plot_normal_vs_reprint_comparison(data_by_combination, test_name):
             combos[key] = {}
         combos[key][ttype] = (c, p)
 
-    # Plot per combo with both series
+    # Plot per combo with separate subplots for Print 1 and Print 2
     for (f, s), series_map in combos.items():
-        if 'normal' not in series_map or 'reprint' not in series_map:
+        if 'normal' not in series_map and 'reprint' not in series_map:
             continue
-        cn, pn = series_map['normal']
-        cr, pr = series_map['reprint']
-        if len(cn) == 0 or len(cr) == 0:
+        cn, pn = series_map.get('normal', (np.array([]), np.array([])))
+        cr, pr = series_map.get('reprint', (np.array([]), np.array([])))
+        if len(cn) == 0 and len(cr) == 0:
             continue
-        common = sorted(list(set(cn.tolist()) & set(cr.tolist())))
-        if common:
-            pn_plot = np.array([pn[cn.tolist().index(c)] for c in common])
-            pr_plot = np.array([pr[cr.tolist().index(c)] for c in common])
-            cx = np.array(common)
-        else:
-            # Fallback: align by min length
-            m = min(len(cn), len(cr))
-            cx = cn[:m]
-            pn_plot = pn[:m]
-            pr_plot = pr[:m]
 
-        fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+        # Establish a common cycle axis if both present
+        if len(cn) and len(cr):
+            common = sorted(list(set(cn.tolist()) & set(cr.tolist())))
+            if common:
+                pn_plot = np.array([pn[cn.tolist().index(c)] for c in common if c in cn.tolist()])
+                pr_plot = np.array([pr[cr.tolist().index(c)] for c in common if c in cr.tolist()])
+                cx_n = cx_r = np.array(common)
+            else:
+                m_n = len(cn); m_r = len(cr)
+                # keep native axes separately if no intersection
+                pn_plot = pn; pr_plot = pr
+                cx_n = cn; cx_r = cr
+        else:
+            pn_plot = pn; pr_plot = pr
+            cx_n = cn; cx_r = cr
+
         name = get_filament_name(f)
-        ax.plot(cx, pn_plot, label='Print 1', color='tab:blue', linewidth=2.3)
-        ax.plot(cx, pr_plot, label='Print 2', color='tab:orange', linewidth=2.3)
-        ax.tick_params(axis='both', which='major', labelsize=14)
-        ax.set_xlabel('Cycle Number', fontsize=14)
-        ax.set_ylabel('Peak Force (kN)', fontsize=14)
-        # ax.set_title(f'{test_name} Normal vs Reprint\n{name} SVF {s}%', fontsize=14)
-        ax.grid(True, alpha=0.3)
-        ax.legend(fontsize=14)
-        plt.tight_layout()
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 7), sharey=True)
+
+        # Print 1 subplot
+        if len(cx_n):
+            ax1.plot(cx_n, pn_plot, color='tab:blue', linewidth=2.6, label='Print 1')
+        ax1.set_xlabel('Cycle Number', fontsize=14)
+        ax1.set_ylabel('Peak Force (kN)', fontsize=14)
+        ax1.tick_params(axis='both', which='major', labelsize=13)
+        ax1.grid(True, alpha=0.3)
+        ax1.set_title('Print 1', fontsize=14)
+        if len(cx_n):
+            ax1.legend(fontsize=12)
+
+        # Print 2 subplot
+        if len(cx_r):
+            ax2.plot(cx_r, pr_plot, color='tab:orange', linewidth=2.6, label='Print 2')
+        ax2.set_xlabel('Cycle Number', fontsize=14)
+        ax2.tick_params(axis='both', which='major', labelsize=13)
+        ax2.grid(True, alpha=0.3)
+        ax2.set_title('Print 2', fontsize=14)
+        if len(cx_r):
+            ax2.legend(fontsize=12)
+
+        # Overall (optional) super-title could be re-enabled if needed
+        # fig.suptitle(f'{test_name} {name} SVF {s}% Peak Force vs Cycle', fontsize=15, fontweight='bold')
+        fig.tight_layout()
         fname = f"{test_name}_{name}_SVF_{s}_normal_vs_reprint_peak_force_vs_cycle.png"
         out_path = out_dir / fname
-        plt.savefig(out_path, dpi=300, bbox_inches='tight')
-        plt.close()
-        print(f"  Saved normal vs reprint comparison: {out_path}")
+        fig.savefig(out_path, dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        print(f"  Saved normal vs reprint comparison (separate subplots): {out_path}")
 
 def create_tpu95a_50_detailed_comparison(data_by_combination, test_name):
     """
