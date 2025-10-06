@@ -34,21 +34,26 @@ def _add_cycle_trend_arrow(ax, centroids, color='black'):
         arrowprops = dict(arrowstyle='->', color=color, lw=2.5, shrinkA=0, shrinkB=0,
                           mutation_scale=18, alpha=0.85)
         ax.annotate('', xy=(x1, y1), xytext=(x0, y0), arrowprops=arrowprops)
-        # Place label near 60% along arrow vector with slight normal offset
-        frac = 0.6
-        xm = x0 + frac * (x1 - x0)
-        ym = y0 + frac * (y1 - y1 if True else y1 - y0)  # keep original y0->y1 slope
-        # compute small perpendicular offset for readability
-        dx = x1 - x0; dy = y1 - y0
-        norm = np.hypot(dx, dy)
-        if norm > 0:
-            nx = -dy / norm; ny = dx / norm
-        else:
-            nx = 0; ny = 0
-        xm_off = xm + 0.05 * nx * norm
-        ym_off = ym + 0.05 * ny * norm
-        ax.text(xm_off, ym_off, 'Cycle Trend', fontsize=16, color='black',
-                ha='center', va='center', bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.7))
+        
+        # Add a legend-style label in a fixed position (center-right)
+        # Create a small arrow icon in the legend to match the trend arrow
+        from matplotlib.patches import FancyArrowPatch
+        from matplotlib.lines import Line2D
+        
+        # Add a legend entry that looks like the cycle trend arrow
+        legend_arrow = Line2D([0], [0], color=color, linewidth=2.5, alpha=0.85, 
+                             marker='>', markersize=8, markerfacecolor=color,
+                             label='Cycle Trend', linestyle='-')
+        
+        # Get current legend handles and labels
+        handles, labels = ax.get_legend_handles_labels()
+        
+        # Add the cycle trend to the legend if it's not already there
+        if 'Cycle Trend' not in labels:
+            handles.append(legend_arrow)
+            labels.append('Cycle Trend')
+            ax.legend(handles, labels, loc='center right', bbox_to_anchor=(0.98, 0.5), 
+                     fontsize=12, framealpha=0.9)
     except Exception:
         pass
 
@@ -3114,7 +3119,7 @@ def plot_test1_average_energy_loss_histogram(base_path, cycles=[1, 100, 1000]):
     ax.set_xticks(x)
     ax.set_xticklabels(combo_labels, rotation=45, ha='right')
     ax.set_xlabel('Filament–SVF Combinations', fontsize=16)
-    ax.set_ylabel('Average Energy Loss (J)', fontsize=16)
+    ax.set_ylabel('Energy Loss (J)', fontsize=16)
     # ax.set_title('Test 1 Average Energy Loss per Combination\nCycles 1, 100, and 1000 (mean across samples) — 1 kN·mm = 1 J', fontsize=16)
     ax.legend(fontsize=16)
     ax.grid(True, axis='y', alpha=0.3)
@@ -3388,7 +3393,7 @@ def plot_test_average_energy_loss_histogram(base_path, test_name, cycles=[1, 100
     ax.set_xticks(x)
     ax.set_xticklabels(combo_labels, rotation=45, ha='right')
     ax.set_xlabel('Filament–SVF Combinations', fontsize=16)
-    ax.set_ylabel('Average Energy Loss (J)', fontsize=16)
+    ax.set_ylabel('Energy Loss (J)', fontsize=16)
     ax.legend(fontsize=16)
     ax.grid(True, axis='y', alpha=0.3)
 
