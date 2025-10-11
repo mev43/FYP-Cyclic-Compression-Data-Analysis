@@ -1,8 +1,8 @@
 """Quasi-static compression data analysis
 
 Generates:
-    1. Individual engineering stress–strain curves for every test replicate (FINAL CYCLE ONLY when --final-only is used).
-    2. Average engineering stress–strain curve (with ±1 SD band) for each filament type (87, 90, 95) using those final cycles.
+    1. Individual engineering stress–strain curves for every test replicate (FINAL CYCLE LOADING BRANCH by default).
+    2. Average engineering stress–strain curve (with ±1 SD band) for each filament type (87, 90, 95) using those final-cycle loading branches.
 
 Assumptions / Conventions:
   * Folder structure (example):
@@ -22,18 +22,17 @@ Assumptions / Conventions:
   * Engineering strain (compressive) is taken as positive magnitude: strain = -Displacement_mm / L0_mm (since displacement is negative in compression).
     Also included: signed_strain (will be negative for compression) in the output CSV for completeness.
     * Force & displacement are zero-shifted by subtracting their first sample values so curves start nearer (0,0).
-    * By default all cycles are processed; pass --final-only to restrict to the last cycle present in each file.
+    * By default, only the final cycle's LOADING branch is used for plots and averages (from start to max compression within that cycle).
     * Use --y-cap-percentile (e.g. 99 or 97.5) to automatically cap y-axis (stress) at that positive magnitude percentile to avoid skew from spikes.
-    * Curve clipping: by default (can disable with --no-stress-clip) if strain reaches 0.6, the stress value at 0.6 strain (interpolated) is S0. Any subsequent points where stress > stress_clip_multiplier * S0 (default 2.0) are removed (curve truncated at first violation).
 
 CLI:
   python quasi_static_analysis.py --base "Quasi-static" --area 3600 --length 60
 
 Outputs under: Quasi-static/analysis_results/
-  individual_curves/filament_<filament>_test_<rep>.png
-  individual_curves/filament_<filament>_test_<rep>.csv (clean stress-strain data)
-  averages/filament_<filament>_average_curve.png
-  averages/filament_<filament>_average_curve.csv (mean, std, n at each strain point)
+    individual_curves/filament_<filament>_test_<rep>.png
+    individual_curves/filament_<filament>_test_<rep>.csv (clean stress–strain data for final-cycle loading branch)
+    averages/filament_<filament>_average_curve.png
+    averages/filament_<filament>_average_curve.csv (mean, std, n at each strain point; final-cycle loading branch only)
 
 If a filament has fewer than 2 valid replicates, an average curve is still produced (std = 0).
 
@@ -52,6 +51,12 @@ matplotlib.use('Agg')  # headless
 import matplotlib.pyplot as plt
 import seaborn as sns
 from typing import Dict, List, Tuple
+try:
+    from brokenaxes import brokenaxes as BrokenAxes  # type: ignore
+    HAS_BROKENAXES = True
+except Exception:
+    BrokenAxes = None  # type: ignore
+    HAS_BROKENAXES = False
 
 
 DEFAULT_AREA_MM2 = 60 * 60  # 3600 mm^2
@@ -168,45 +173,10 @@ def discover_tests(base_dir: Path) -> List[Dict]:
     return tests
 
 
-def _clip_stress_curve(df: pd.DataFrame, strain_col: str, stress_col: str, trigger_strain: float, multiplier: float, debug: bool = False) -> pd.DataFrame:
-    """Clip curve after it exceeds multiplier * stress_at(trigger_strain).
-
-    - If maximum strain < trigger_strain, returns df unchanged.
-    - Interpolates stress at trigger_strain using existing data (requires monotonic strain ascending).
-    - Finds first index where stress > multiplier * stress_at_trigger and truncates (keeps data up to previous index).
-    """
-    if df.empty:
-        return df
-    if df[strain_col].max() < trigger_strain:
-        return df
-    # Prepare monotonic data (assume already sorted by processing, but enforce)
-    work = df.sort_values(strain_col).drop_duplicates(subset=strain_col)
-    try:
-        stress_at_trigger = np.interp(trigger_strain, work[strain_col].values, work[stress_col].values)
-    except Exception:
-        return df
-    if not np.isfinite(stress_at_trigger):
-        return df
-    threshold = multiplier * stress_at_trigger
-    exceed = work[stress_col].values > threshold
-    if not np.any(exceed):
-        return df
-    first_exceed_idx = np.argmax(exceed)
-    # Keep all rows with strain <= strain at index before exceed (avoid including exceed sample)
-    if first_exceed_idx == 0:
-        # Everything exceeds; return empty to signal removal
-        if debug:
-            print(f"[DEBUG] Stress clipping removed entire curve (threshold={threshold:.3f})")
-        return work.iloc[0:0]
-    cutoff_strain = work.iloc[first_exceed_idx - 1][strain_col]
-    clipped = df[df[strain_col] <= cutoff_strain].copy()
-    if debug:
-        print(f"[DEBUG] Stress clipping applied: trigger_strain={trigger_strain}, S0={stress_at_trigger:.3f}, threshold={threshold:.3f}, cutoff_strain={cutoff_strain:.4f}, kept_rows={len(clipped)} (from {len(df)})")
-    return clipped
+## Removed: stress clipping functionality (was truncating curves after a threshold). Keeping full curves now.
 
 
-def build_individual_curves(tests: List[Dict], area_mm2: float, gauge_length_mm: float, final_only: bool = False, debug: bool = False, loading_only: bool = False,
-                            stress_clip: bool = True, stress_clip_trigger: float = 0.6, stress_clip_multiplier: float = 2.0) -> List[Dict]:
+def build_individual_curves(tests: List[Dict], area_mm2: float, gauge_length_mm: float, final_only: bool = True, debug: bool = False, loading_only: bool = True) -> List[Dict]:
     """Load and compute stress-strain for each test.
 
     Returns list of dicts with keys: filament, svf, rep, data (DataFrame).
@@ -240,12 +210,6 @@ def build_individual_curves(tests: List[Dict], area_mm2: float, gauge_length_mm:
                         print(f"[DEBUG] {path.name}: loading_only applied, rows before={len(raw)}, after={len(loading_branch)}, min_idx={min_idx}")
                     raw = loading_branch.reset_index(drop=True)
             enriched = compute_engineering_stress_strain(raw, area_mm2, gauge_length_mm)
-            # Apply stress clipping (using positive magnitude stress) after stress/strain computation
-            if stress_clip and not enriched.empty:
-                before_len = len(enriched)
-                enriched = _clip_stress_curve(enriched, 'strain', 'stress_MPa_mag', stress_clip_trigger, stress_clip_multiplier, debug=debug)
-                if debug and before_len != len(enriched):
-                    print(f"[DEBUG] Clipped curve length {before_len} -> {len(enriched)} for {path.name}")
             if enriched.empty:
                 continue
             meta_copy = dict(meta)
@@ -344,22 +308,51 @@ def plot_individual_curves(individual: List[Dict], dirs: Dict[str, Path], y_cap_
         filament = test['filament']
         rep = test['rep']
         svf = test['svf']
-        fig, ax = plt.subplots(figsize=(7, 6))
-        ax.plot(data['strain'], data['stress_MPa_mag'], color='tab:blue', lw=2)
-        ann_parts = []
+
+        # Prepare data and title
+        x = data['strain'].values
+        y = data['stress_MPa_mag'].values
+        title = f'Filament {filament} SVF {svf}% Rep {rep}'
+        suffix = []
         if final_only:
-            ann_parts.append('Final Cycle')
+            suffix.append('Final Cycle')
         if loading_only:
-            ann_parts.append('Loading Branch')
-        if ann_parts:
-            ax.text(0.02, 0.95, ', '.join(ann_parts), transform=ax.transAxes, fontsize=9,
-                    bbox=dict(boxstyle='round,pad=0.3', facecolor='lightyellow', alpha=0.6))
-        _auto_cap(ax, data['stress_MPa_mag'].values, y_cap_percentile)
-        ax.set_xlabel('Engineering Strain (Compression, +)')
-        ax.set_ylabel('Engineering Stress (MPa, + Compression)')
-        ax.set_title(f'Filament {filament} SVF {svf}% Rep {rep}')
-        ax.grid(True, alpha=0.3)
-        plt.tight_layout()
+            suffix.append('Loading Branch')
+        if suffix:
+            title += ' (' + ', '.join(suffix) + ')'
+
+        # Determine windows for broken y-axis: [0, 60%*peak] and [99%*peak, ~102%*peak]
+        fig = None
+        try:
+            peak = float(np.nanmax(y)) if y.size else 0.0
+        except Exception:
+            peak = 0.0
+
+        use_broken = HAS_BROKENAXES and np.isfinite(peak) and peak > 0
+        if use_broken:
+            low_end = 0.07 * peak
+            high_start = 0.95 * peak
+            high_end = max(high_start * 1.001, 1.02 * peak)
+            fig = plt.figure(figsize=(7, 6))
+            bax = BrokenAxes(ylims=((0.0, low_end), (high_start, high_end)), hspace=0.05)
+            bax.plot(x, y, color='tab:blue', lw=2)
+            # Manual axis labels using fig.text()
+            fig.text(0.5, -0.02, 'Engineering Strain', ha='center', va='bottom', fontsize=20)
+            fig.text(-0.02, 0.5, 'Engineering Stress', ha='left', va='center', rotation=90, fontsize=20)
+            # bax.set_title(title)
+            bax.tick_params(labelsize=15)
+            bax.grid(True, alpha=0.3)
+        else:
+            fig, ax = plt.subplots(figsize=(7, 6))
+            ax.plot(x, y, color='tab:blue', lw=2)
+            _auto_cap(ax, y, y_cap_percentile)
+            # Manual axis labels using fig.text()
+            fig.text(0.5, 0.0, 'Engineering Strain', ha='center', va='bottom', fontsize=14)
+            fig.text(0.0, 0.5, 'Engineering Stress', ha='left', va='center', rotation=90, fontsize=14)
+            # ax.set_title(title)
+            ax.grid(True, alpha=0.3)
+
+        # plt.tight_layout()
         out_png = dirs['individual'] / f'filament_{filament}_svf_{svf}_rep_{rep}.png'
         plt.savefig(out_png, dpi=300)
         plt.close(fig)
@@ -373,17 +366,11 @@ def plot_average_curves(averages: Dict[int, Dict], dirs: Dict[str, Path], y_cap_
     sns.set_context('talk')
     palette = {87: 'tab:green', 90: 'tab:orange', 95: 'tab:red'}
     for filament, info in sorted(averages.items()):
-        fig, ax = plt.subplots(figsize=(7, 6))
         strain = info['strain_axis']
         mean = info['mean_stress_MPa']
         std = info['std_stress_MPa']
         n = info['n']
         color = palette.get(filament, 'tab:blue')
-        ax.plot(strain, mean, color=color, lw=2.5, label=f'Filament {filament} (n={n})')
-        if n > 1:
-            ax.fill_between(strain, mean - std, mean + std, color=color, alpha=0.25, label='±1 SD')
-        ax.set_xlabel('Engineering Strain (Compression, +)')
-        ax.set_ylabel('Engineering Stress (MPa, + Compression)')
         title = f'Average Stress–Strain: Filament {filament}'
         suffix_parts = []
         if final_only:
@@ -392,11 +379,43 @@ def plot_average_curves(averages: Dict[int, Dict], dirs: Dict[str, Path], y_cap_
             suffix_parts.append('Loading Branch')
         if suffix_parts:
             title += ' (' + ', '.join(suffix_parts) + ')'
-        ax.set_title(title)
-        ax.legend()
-        ax.grid(True, alpha=0.3)
-        _auto_cap(ax, mean, y_cap_percentile)
-        plt.tight_layout()
+
+        # Determine peak for window sizing
+        try:
+            peak = float(np.nanmax(mean + std)) if n > 1 else float(np.nanmax(mean))
+        except Exception:
+            peak = 0.0
+
+        use_broken = HAS_BROKENAXES and np.isfinite(peak) and peak > 0
+        if use_broken:
+            low_end = 0.07 * peak
+            high_start = 0.95 * peak
+            high_end = max(high_start * 1.001, 1.02 * peak)
+            fig = plt.figure(figsize=(7, 6))
+            bax = BrokenAxes(ylims=((0.0, low_end), (high_start, high_end)), hspace=0.05)
+            bax.plot(strain, mean, color=color, lw=2.5, label=f'Filament {filament} (n={n})')
+            if n > 1:
+                bax.fill_between(strain, mean - std, mean + std, color=color, alpha=0.25, label='±1 SD')
+            # Manual axis labels using fig.text()
+            fig.text(0.5, 0.0, 'Engineering Strain', ha='center', va='bottom', fontsize=14)
+            fig.text(0.0, 0.5, 'Engineering Stress', ha='left', va='center', rotation=90, fontsize=14)
+            bax.tick_params(labelsize=15)
+            bax.legend()
+            bax.grid(True, alpha=0.3)
+        else:
+            fig, ax = plt.subplots(figsize=(7, 6))
+            ax.plot(strain, mean, color=color, lw=2.5, label=f'Filament {filament} (n={n})')
+            if n > 1:
+                ax.fill_between(strain, mean - std, mean + std, color=color, alpha=0.25, label='±1 SD')
+            # Manual axis labels using fig.text()
+            fig.text(0.5, 0.0, 'Engineering Strain', ha='center', va='bottom', fontsize=14)
+            fig.text(0.0, 0.5, 'Engineering Stress', ha='left', va='center', rotation=90, fontsize=14)
+            # ax.set_title(title)
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            _auto_cap(ax, mean, y_cap_percentile)
+
+        # plt.tight_layout()
         out_png = dirs['averages'] / f'filament_{filament}_average_curve.png'
         plt.savefig(out_png, dpi=300)
         plt.close(fig)
@@ -412,9 +431,8 @@ def plot_average_curves(averages: Dict[int, Dict], dirs: Dict[str, Path], y_cap_
         print(f"Saved average curve: {out_png.name}")
 
 
-def run_analysis(base: Path, area_mm2: float, gauge_length_mm: float, final_only: bool = False, y_cap_percentile: float | None = None,
-                 debug: bool = False, loading_only: bool = False,
-                 stress_clip: bool = True, stress_clip_trigger: float = 0.6, stress_clip_multiplier: float = 2.0):
+def run_analysis(base: Path, area_mm2: float, gauge_length_mm: float, final_only: bool = True, y_cap_percentile: float | None = None,
+                 debug: bool = False, loading_only: bool = True):
     print(f"Scanning quasi-static tests under: {base}")
     tests_meta = discover_tests(base)
     if not tests_meta:
@@ -424,7 +442,6 @@ def run_analysis(base: Path, area_mm2: float, gauge_length_mm: float, final_only
     individual_processed = build_individual_curves(
         tests_meta, area_mm2, gauge_length_mm,
         final_only=final_only, debug=debug, loading_only=loading_only,
-        stress_clip=stress_clip, stress_clip_trigger=stress_clip_trigger, stress_clip_multiplier=stress_clip_multiplier
     )
     print(f" Processed {len(individual_processed)} tests successfully.")
     dirs = ensure_output_dirs(base)
@@ -442,13 +459,15 @@ def build_arg_parser():
     p.add_argument('--base', type=str, default='Quasi-static', help='Base quasi-static data directory')
     p.add_argument('--area', type=float, default=DEFAULT_AREA_MM2, help='Cross-sectional area (mm^2)')
     p.add_argument('--length', type=float, default=DEFAULT_GAUGE_LENGTH_MM, help='Original gauge length (mm)')
-    p.add_argument('--final-only', action='store_true', help='Use only the final (last) cycle from each test file.')
+    p.add_argument('--final-only', dest='final_only', action='store_true', help='Use only the final (last) cycle from each test file.')
+    p.add_argument('--no-final-only', dest='final_only', action='store_false', help='Process all cycles (not recommended).')
+    p.set_defaults(final_only=True)
     p.add_argument('--y-cap-percentile', type=float, default=None, help='Percentile (e.g., 99, 97.5) to cap y-axis of stress plots (positive magnitude).')
     p.add_argument('--debug', action='store_true', help='Enable verbose debug output for cycle filtering.')
-    p.add_argument('--loading-only', action='store_true', help='Keep only loading branch (start to max compression) within the final cycle.')
-    p.add_argument('--no-stress-clip', action='store_true', help='Disable stress clipping beyond multiplier * stress at trigger strain (default trigger=0.6, multiplier=2).')
-    p.add_argument('--stress-clip-trigger', type=float, default=0.6, help='Trigger strain at which reference stress S0 is taken (default 0.6).')
-    p.add_argument('--stress-clip-multiplier', type=float, default=2.0, help='Multiplier of S0 defining clipping threshold (default 2.0).')
+    p.add_argument('--loading-only', dest='loading_only', action='store_true', help='Keep only loading branch (start to max compression) within the final cycle.')
+    p.add_argument('--no-loading-only', dest='loading_only', action='store_false', help='Keep both loading and unloading branches.')
+    p.set_defaults(loading_only=True)
+    # Stress clipping removed; curves are no longer truncated.
     return p
 
 
@@ -466,9 +485,6 @@ def main():
         y_cap_percentile=args.y_cap_percentile,
         debug=args.debug,
         loading_only=args.loading_only,
-        stress_clip=not args.no_stress_clip,
-        stress_clip_trigger=args.stress_clip_trigger,
-        stress_clip_multiplier=args.stress_clip_multiplier
     )
 
 
