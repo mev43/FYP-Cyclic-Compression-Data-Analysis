@@ -317,6 +317,14 @@ def _adjust_fig_margins(fig, left: float = 0.16, right: float = 0.98, bottom: fl
         pass
 
 
+def _expand_interval(a: float, b: float, span: float, frac: float = 0.01) -> tuple[float, float]:
+    """Expand [a,b] by a fraction of overall span to avoid edge clipping."""
+    if not np.isfinite(a) or not np.isfinite(b) or not np.isfinite(span) or span <= 0:
+        return a, b
+    pad = frac * span
+    return a - pad, b + pad
+
+
 def plot_individual_curves(individual: List[Dict], dirs: Dict[str, Path], y_cap_percentile: float | None = None, final_only: bool = False, loading_only: bool = False):
     sns.set_context('talk')
     for test in individual:
@@ -346,11 +354,37 @@ def plot_individual_curves(individual: List[Dict], dirs: Dict[str, Path], y_cap_
 
         use_broken = HAS_BROKENAXES and np.isfinite(peak) and peak > 0
         if use_broken:
-            low_end = 0.07 * peak
+            # Y windows
+            low_end = 0.055 * peak
             high_start = 0.95 * peak
             high_end = max(high_start * 1.001, 1.02 * peak)
+            # Slightly expand y windows to avoid clipping markers/lines
+            y_span = max(high_end, low_end) - 0.0 if np.isfinite(peak) else 1.0
+            y0a, y0b = _expand_interval(0.0, low_end, y_span, 0.01)
+            y1a, y1b = _expand_interval(high_start, high_end, y_span, 0.01)
+            ylims = ((y0a, y0b), (y1a, y1b))
+            # X windows derived from data where stress falls within Y windows
+            x_arr = np.asarray(x); y_arr = np.asarray(y)
+            xlims = None
+            try:
+                mask_low = (y_arr >= 0.0) & (y_arr <= low_end)
+                mask_high = (y_arr >= high_start) & (y_arr <= high_end)
+                if mask_low.sum() >= 2 and mask_high.sum() >= 2:
+                    x_low_min = float(np.nanmin(x_arr[mask_low])); x_low_max = float(np.nanmax(x_arr[mask_low]))
+                    x_high_min = float(np.nanmin(x_arr[mask_high])); x_high_max = float(np.nanmax(x_arr[mask_high]))
+                    if x_low_max > x_low_min and x_high_max > x_high_min:
+                        # Expand x windows slightly
+                        x_span = float(np.nanmax(x_arr) - np.nanmin(x_arr)) if x_arr.size else 1.0
+                        x0a, x0b = _expand_interval(x_low_min, x_low_max, x_span, 0.01)
+                        x1a, x1b = _expand_interval(x_high_min, x_high_max, x_span, 0.01)
+                        xlims = ((x0a, x0b), (x1a, x1b))
+            except Exception:
+                xlims = None
             fig = plt.figure(figsize=(7, 6))
-            bax = BrokenAxes(ylims=((0.0, low_end), (high_start, high_end)), hspace=0.05)
+            if xlims is not None:
+                bax = BrokenAxes(ylims=ylims, xlims=xlims, hspace=0.05, wspace=0.05)
+            else:
+                bax = BrokenAxes(ylims=ylims, hspace=0.05)
             bax.plot(x, y, color='tab:blue', lw=2)
             # Manual axis labels using fig.text()
             fig.text(0.5, -0.02, 'Engineering Strain', ha='center', va='bottom', fontsize=18)
@@ -407,19 +441,45 @@ def plot_average_curves(averages: Dict[int, Dict], dirs: Dict[str, Path], y_cap_
 
         use_broken = HAS_BROKENAXES and np.isfinite(peak) and peak > 0
         if use_broken:
-            low_end = 0.07 * peak
+            # Y windows
+            low_end = 0.055 * peak
             high_start = 0.95 * peak
             high_end = max(high_start * 1.001, 1.02 * peak)
+            # Slightly expand y windows to avoid clipping
+            y_span = max(high_end, low_end) - 0.0 if np.isfinite(peak) else 1.0
+            y0a, y0b = _expand_interval(0.0, low_end, y_span, 0.01)
+            y1a, y1b = _expand_interval(high_start, high_end, y_span, 0.01)
+            ylims = ((y0a, y0b), (y1a, y1b))
+            # X windows derived from mean stress windows
+            s_arr = np.asarray(strain); m_arr = np.asarray(mean)
+            xlims = None
+            try:
+                mask_low = (m_arr >= 0.0) & (m_arr <= low_end)
+                mask_high = (m_arr >= high_start) & (m_arr <= high_end)
+                if mask_low.sum() >= 2 and mask_high.sum() >= 2:
+                    x_low_min = float(np.nanmin(s_arr[mask_low])); x_low_max = float(np.nanmax(s_arr[mask_low]))
+                    x_high_min = float(np.nanmin(s_arr[mask_high])); x_high_max = float(np.nanmax(s_arr[mask_high]))
+                    if x_low_max > x_low_min and x_high_max > x_high_min:
+                        # Expand x windows slightly
+                        x_span = float(np.nanmax(s_arr) - np.nanmin(s_arr)) if s_arr.size else 1.0
+                        x0a, x0b = _expand_interval(x_low_min, x_low_max, x_span, 0.01)
+                        x1a, x1b = _expand_interval(x_high_min, x_high_max, x_span, 0.01)
+                        xlims = ((x0a, x0b), (x1a, x1b))
+            except Exception:
+                xlims = None
             fig = plt.figure(figsize=(7, 6))
-            bax = BrokenAxes(ylims=((0.0, low_end), (high_start, high_end)), hspace=0.05)
+            if xlims is not None:
+                bax = BrokenAxes(ylims=ylims, xlims=xlims, hspace=0.05, wspace=0.05)
+            else:
+                bax = BrokenAxes(ylims=ylims, hspace=0.05)
             bax.plot(strain, mean, color=color, lw=2.5, label=f'Filament {filament} (n={n})')
-            if n > 1:
-                bax.fill_between(strain, mean - std, mean + std, color=color, alpha=0.25, label='±1 SD')
+            # if n > 1:
+            #     bax.fill_between(strain, mean - std, mean + std, color=color, alpha=0.25, label='±1 SD')
             # Manual axis labels using fig.text()
             fig.text(0.5, -0.02, 'Engineering Strain', ha='center', va='bottom', fontsize=18)
             fig.text(-0.02, 0.5, 'Engineering Stress', ha='left', va='center', rotation=90, fontsize=18)
             bax.tick_params(labelsize=14)
-            bax.legend()
+            # bax.legend()
             bax.grid(True, alpha=0.3)
             # _adjust_fig_margins(fig)
         else:
