@@ -355,7 +355,7 @@ def plot_individual_curves(individual: List[Dict], dirs: Dict[str, Path], y_cap_
         use_broken = HAS_BROKENAXES and np.isfinite(peak) and peak > 0
         if use_broken:
             # Y windows
-            low_end = 0.055 * peak
+            low_end = 0.05 * peak
             high_start = 0.95 * peak
             high_end = max(high_start * 1.001, 1.02 * peak)
             # Slightly expand y windows to avoid clipping markers/lines
@@ -442,7 +442,7 @@ def plot_average_curves(averages: Dict[int, Dict], dirs: Dict[str, Path], y_cap_
         use_broken = HAS_BROKENAXES and np.isfinite(peak) and peak > 0
         if use_broken:
             # Y windows
-            low_end = 0.055 * peak
+            low_end = 0.05 * peak
             high_start = 0.95 * peak
             high_end = max(high_start * 1.001, 1.02 * peak)
             # Slightly expand y windows to avoid clipping
@@ -513,6 +513,120 @@ def plot_average_curves(averages: Dict[int, Dict], dirs: Dict[str, Path], y_cap_
         print(f"Saved average curve: {out_png.name}")
 
 
+def plot_average_overlay(averages: Dict[int, Dict], dirs: Dict[str, Path], y_cap_percentile: float | None = None,
+                         final_only: bool = False, loading_only: bool = False):
+    """Plot the three filament mean curves on the same axes."""
+    if not averages:
+        return
+    sns.set_context('talk')
+    palette = {87: 'tab:green', 90: 'tab:orange', 95: 'tab:red'}
+    # Collect curves
+    curves = []
+    all_means = []
+    all_strains = []
+    for filament, info in sorted(averages.items()):
+        strain = np.asarray(info['strain_axis'])
+        mean = np.asarray(info['mean_stress_MPa'])
+        n = info['n']
+        color = palette.get(filament, 'tab:blue')
+        curves.append({'filament': filament, 'strain': strain, 'mean': mean, 'n': n, 'color': color})
+        all_means.append(mean)
+        all_strains.append(strain)
+
+    # Determine peak across all curves (use max of all means)
+    try:
+        peak = float(np.nanmax(np.concatenate(all_means))) if all_means else 0.0
+    except Exception:
+        peak = 0.0
+
+    use_broken = HAS_BROKENAXES and np.isfinite(peak) and peak > 0
+    if use_broken:
+        # Y windows (same as other plots)
+        low_end = 0.05 * peak
+        high_start = 0.95 * peak
+        high_end = max(high_start * 1.001, 1.02 * peak)
+        # Expand slightly to avoid clipping
+        y_span = max(high_end, low_end) - 0.0 if np.isfinite(peak) else 1.0
+        y0a, y0b = _expand_interval(0.0, low_end, y_span, 0.01)
+        y1a, y1b = _expand_interval(high_start, high_end, y_span, 0.01)
+        ylims = ((y0a, y0b), (y1a, y1b))
+
+        # Derive union X windows from where stress lies in the Y windows across all curves
+        x_low_min = np.inf
+        x_low_max = -np.inf
+        x_high_min = np.inf
+        x_high_max = -np.inf
+        low_ok = False
+        high_ok = False
+        try:
+            for c in curves:
+                s_arr = c['strain']
+                m_arr = c['mean']
+                mask_low = (m_arr >= 0.0) & (m_arr <= low_end)
+                mask_high = (m_arr >= high_start) & (m_arr <= high_end)
+                if mask_low.sum() >= 2:
+                    low_ok = True
+                    x_low_min = min(x_low_min, float(np.nanmin(s_arr[mask_low])))
+                    x_low_max = max(x_low_max, float(np.nanmax(s_arr[mask_low])))
+                if mask_high.sum() >= 2:
+                    high_ok = True
+                    x_high_min = min(x_high_min, float(np.nanmin(s_arr[mask_high])))
+                    x_high_max = max(x_high_max, float(np.nanmax(s_arr[mask_high])))
+        except Exception:
+            low_ok = high_ok = False
+
+        # Finalize xlims if both bands are valid and have width
+        xlims = None
+        if low_ok and high_ok and x_low_max > x_low_min and x_high_max > x_high_min:
+            # Slight expansion based on overall strain span
+            try:
+                s_all = np.concatenate(all_strains) if all_strains else np.array([0.0, 1.0])
+                x_span = float(np.nanmax(s_all) - np.nanmin(s_all)) if s_all.size else 1.0
+            except Exception:
+                x_span = 1.0
+            x0a, x0b = _expand_interval(x_low_min, x_low_max, x_span, 0.01)
+            x1a, x1b = _expand_interval(x_high_min, x_high_max, x_span, 0.01)
+            xlims = ((x0a, x0b), (x1a, x1b))
+
+        fig = plt.figure(figsize=(7, 6))
+        if xlims is not None:
+            bax = BrokenAxes(ylims=ylims, xlims=xlims, hspace=0.05, wspace=0.05)
+        else:
+            bax = BrokenAxes(ylims=ylims, hspace=0.05)
+        for c in curves:
+            bax.plot(c['strain'], c['mean'], lw=2.2, color=c['color'], label=f"{c['filament']} (n={c['n']})")
+        # Labels
+        fig.text(0.5, -0.02, 'Engineering Strain', ha='center', va='bottom', fontsize=18)
+        fig.text(-0.02, 0.5, 'Engineering Stress', ha='left', va='center', rotation=90, fontsize=18)
+        bax.tick_params(labelsize=14)
+        bax.grid(True, alpha=0.3)
+        bax.legend(title='Filament')
+    else:
+        fig, ax = plt.subplots(figsize=(7, 6))
+        y_all = []
+        for c in curves:
+            ax.plot(c['strain'], c['mean'], lw=2.2, color=c['color'], label=f"{c['filament']} (n={c['n']})")
+            y_all.append(c['mean'])
+        # Labels and styling
+        fig.text(0.5, 0.0, 'Engineering Strain', ha='center', va='bottom', fontsize=18)
+        fig.text(0.0, 0.5, 'Engineering Stress', ha='left', va='center', rotation=90, fontsize=18)
+        ax.grid(True, alpha=0.3)
+        if y_all:
+            try:
+                y_concat = np.concatenate(y_all)
+                _auto_cap(ax, y_concat, y_cap_percentile)
+            except Exception:
+                pass
+        _add_axes_data_margins(ax)
+        _adjust_fig_margins(fig)
+        ax.legend(title='Filament')
+
+    out_png = dirs['averages'] / 'average_overlay.png'
+    plt.savefig(out_png, dpi=300, bbox_inches='tight', pad_inches=0.25)
+    plt.close(fig)
+    print(f"Saved overlay plot: {out_png.name}")
+
+
 def run_analysis(base: Path, area_mm2: float, gauge_length_mm: float, final_only: bool = True, y_cap_percentile: float | None = None,
                  debug: bool = False, loading_only: bool = True):
     print(f"Scanning quasi-static tests under: {base}")
@@ -533,6 +647,7 @@ def run_analysis(base: Path, area_mm2: float, gauge_length_mm: float, final_only
         print("No averages computed (insufficient data).")
         return
     plot_average_curves(averages, dirs, y_cap_percentile=y_cap_percentile, final_only=final_only, loading_only=loading_only)
+    plot_average_overlay(averages, dirs, y_cap_percentile=y_cap_percentile, final_only=final_only, loading_only=loading_only)
     print(f"All outputs written to: {dirs['root']}\nDone.")
 
 
