@@ -301,6 +301,22 @@ def _auto_cap(ax, y_values: np.ndarray, percentile: float | None):
         ax.set_ylim(0, cap * 1.02)
 
 
+def _add_axes_data_margins(ax, x: float = 0.02, y: float = 0.05):
+    """Add a small data margin so curves aren't flush against axes borders."""
+    try:
+        ax.margins(x=x, y=y)
+    except Exception:
+        pass
+
+
+def _adjust_fig_margins(fig, left: float = 0.16, right: float = 0.98, bottom: float = 0.16, top: float = 0.98):
+    """Adjust figure margins to add whitespace between content and image edges."""
+    try:
+        fig.subplots_adjust(left=left, right=right, bottom=bottom, top=top)
+    except Exception:
+        pass
+
+
 def plot_individual_curves(individual: List[Dict], dirs: Dict[str, Path], y_cap_percentile: float | None = None, final_only: bool = False, loading_only: bool = False):
     sns.set_context('talk')
     for test in individual:
@@ -337,24 +353,27 @@ def plot_individual_curves(individual: List[Dict], dirs: Dict[str, Path], y_cap_
             bax = BrokenAxes(ylims=((0.0, low_end), (high_start, high_end)), hspace=0.05)
             bax.plot(x, y, color='tab:blue', lw=2)
             # Manual axis labels using fig.text()
-            fig.text(0.5, -0.02, 'Engineering Strain', ha='center', va='bottom', fontsize=20)
-            fig.text(-0.02, 0.5, 'Engineering Stress', ha='left', va='center', rotation=90, fontsize=20)
+            fig.text(0.5, -0.02, 'Engineering Strain', ha='center', va='bottom', fontsize=18)
+            fig.text(-0.02, 0.5, 'Engineering Stress', ha='left', va='center', rotation=90, fontsize=18)
             # bax.set_title(title)
-            bax.tick_params(labelsize=15)
+            bax.tick_params(labelsize=14)
             bax.grid(True, alpha=0.3)
+            # _adjust_fig_margins(fig)
         else:
             fig, ax = plt.subplots(figsize=(7, 6))
             ax.plot(x, y, color='tab:blue', lw=2)
             _auto_cap(ax, y, y_cap_percentile)
             # Manual axis labels using fig.text()
-            fig.text(0.5, 0.0, 'Engineering Strain', ha='center', va='bottom', fontsize=14)
-            fig.text(0.0, 0.5, 'Engineering Stress', ha='left', va='center', rotation=90, fontsize=14)
+            fig.text(0.5, 0.0, 'Engineering Strain', ha='center', va='bottom', fontsize=18)
+            fig.text(0.0, 0.5, 'Engineering Stress', ha='left', va='center', rotation=90, fontsize=18)
             # ax.set_title(title)
             ax.grid(True, alpha=0.3)
+            _add_axes_data_margins(ax)
+            _adjust_fig_margins(fig)
 
         # plt.tight_layout()
         out_png = dirs['individual'] / f'filament_{filament}_svf_{svf}_rep_{rep}.png'
-        plt.savefig(out_png, dpi=300)
+        plt.savefig(out_png, dpi=300, bbox_inches='tight', pad_inches=0.25)
         plt.close(fig)
         out_csv = dirs['individual'] / f'filament_{filament}_svf_{svf}_rep_{rep}.csv'
         # Export processed curve
@@ -397,27 +416,30 @@ def plot_average_curves(averages: Dict[int, Dict], dirs: Dict[str, Path], y_cap_
             if n > 1:
                 bax.fill_between(strain, mean - std, mean + std, color=color, alpha=0.25, label='±1 SD')
             # Manual axis labels using fig.text()
-            fig.text(0.5, 0.0, 'Engineering Strain', ha='center', va='bottom', fontsize=14)
-            fig.text(0.0, 0.5, 'Engineering Stress', ha='left', va='center', rotation=90, fontsize=14)
-            bax.tick_params(labelsize=15)
+            fig.text(0.5, -0.02, 'Engineering Strain', ha='center', va='bottom', fontsize=18)
+            fig.text(-0.02, 0.5, 'Engineering Stress', ha='left', va='center', rotation=90, fontsize=18)
+            bax.tick_params(labelsize=14)
             bax.legend()
             bax.grid(True, alpha=0.3)
+            # _adjust_fig_margins(fig)
         else:
             fig, ax = plt.subplots(figsize=(7, 6))
             ax.plot(strain, mean, color=color, lw=2.5, label=f'Filament {filament} (n={n})')
             if n > 1:
                 ax.fill_between(strain, mean - std, mean + std, color=color, alpha=0.25, label='±1 SD')
             # Manual axis labels using fig.text()
-            fig.text(0.5, 0.0, 'Engineering Strain', ha='center', va='bottom', fontsize=14)
-            fig.text(0.0, 0.5, 'Engineering Stress', ha='left', va='center', rotation=90, fontsize=14)
+            fig.text(0.5, 0.0, 'Engineering Strain', ha='center', va='bottom', fontsize=18)
+            fig.text(0.0, 0.5, 'Engineering Stress', ha='left', va='center', rotation=90, fontsize=18)
             # ax.set_title(title)
             ax.legend()
             ax.grid(True, alpha=0.3)
             _auto_cap(ax, mean, y_cap_percentile)
+            _add_axes_data_margins(ax)
+            _adjust_fig_margins(fig)
 
         # plt.tight_layout()
         out_png = dirs['averages'] / f'filament_{filament}_average_curve.png'
-        plt.savefig(out_png, dpi=300)
+        plt.savefig(out_png, dpi=300, bbox_inches='tight', pad_inches=0.25)
         plt.close(fig)
         # CSV export
         out_csv = dirs['averages'] / f'filament_{filament}_average_curve.csv'
