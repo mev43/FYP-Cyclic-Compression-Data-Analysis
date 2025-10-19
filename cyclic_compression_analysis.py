@@ -258,11 +258,22 @@ def load_tracking_data(file_path):
         df2['Axial Displacement'] = pd.to_numeric(df2['Axial Displacement'], errors='coerce')
         df2['Axial Force'] = pd.to_numeric(df2['Axial Force'], errors='coerce')
         df2 = df2.dropna(subset=['CycleCount', 'Axial Displacement', 'Axial Force'])
+        
+        # Convert cycle count to int and check if it starts at 0 (new format) or 1 (some Peak-Valley files)
+        df2['CycleCount'] = df2['CycleCount'].astype(int)
+        min_cycle = df2['CycleCount'].min()
+        
+        # If cycles start at 0, add 1 to match legacy format (cycles 1-1001)
+        if min_cycle == 0:
+            df2['CycleCount'] = df2['CycleCount'] + 1
+        
         mapped = pd.DataFrame({
-            'Total Cycles': df2['CycleCount'].astype(int),
+            'Total Cycles': df2['CycleCount'],
             'Displacement(Linear:Digital Position) (mm)': df2['Axial Displacement'].astype(float),
             'Force(Linear:Load) (kN)': (df2['Axial Force'].astype(float)) / 1000.0
         })
+        # Reset index to avoid duplicate index issues
+        mapped = mapped.reset_index(drop=True)
         return mapped
     except Exception as e:
         print(f"Error loading {file_path}: {e}")
@@ -378,13 +389,13 @@ def analyze_week_data(base_path, week_folder_name):
                         vs_calculated = calculate_vertical_stiffness(df)
                         
                         if vs_calculated is not None:
-                            # Round to reasonable precision for grouping (10 N/mm increments)
-                            vs_rounded = round(vs_calculated / 10) * 10
-                            combination_key = f"Filament{filament}_SVF{svf}_VS{vs_rounded}"
+                            # Group by filament and SVF only - don't split by VS at this stage
+                            # VS grouping will happen later via group_similar_vs function
+                            combination_key = f"Filament{filament}_SVF{svf}"
                             
                             if combination_key not in data_by_combination:
                                 data_by_combination[combination_key] = {
-                                    'filament': filament, 'svf': svf, 'vs': vs_rounded, 'normal': {}, 'reprint': {}
+                                    'filament': filament, 'svf': svf, 'normal': {}, 'reprint': {}
                                 }
                             
                             data_by_combination[combination_key][test_type] = {
@@ -410,15 +421,27 @@ def group_similar_vs(data_by_combination, tolerance=40):
     for combination_key, combo_data in data_by_combination.items():
         filament = combo_data['filament']
         svf = combo_data['svf']
-        vs = combo_data['vs']
         
-        # Create a key based on filament and SVF only (ignore individual VS differences)
+        # Compute average VS from normal and reprint calculated values
+        vs_values = []
+        for test_type in ['normal', 'reprint']:
+            if test_type in combo_data and combo_data[test_type]:
+                calc_vs = combo_data[test_type].get('calculated_vs')
+                if calc_vs is not None:
+                    vs_values.append(calc_vs)
+        
+        if not vs_values:
+            continue
+            
+        avg_vs = np.mean(vs_values)
+        
+        # Create a key based on filament and SVF only
         combo_key = (filament, svf)
         
         if combo_key not in combination_vs_averages:
             combination_vs_averages[combo_key] = []
         
-        combination_vs_averages[combo_key].append(vs)
+        combination_vs_averages[combo_key].append(avg_vs)
     
     # Calculate average VS for each filament-SVF combination
     averaged_combinations = {}
@@ -628,7 +651,16 @@ def plot_specific_cycles_force_displacement(data_by_combination, test_name, cycl
     
     # Create individual plots for each combination with all cycles on one plot
     for combination_key, combo_data in data_by_combination.items():
-        filament, svf, vs = combo_data['filament'], combo_data['svf'], combo_data['vs']
+        filament, svf = combo_data['filament'], combo_data['svf']
+        
+        # Compute average VS for display
+        vs_values = []
+        for test_type in ['normal', 'reprint']:
+            if test_type in combo_data and combo_data[test_type]:
+                calc_vs = combo_data[test_type].get('calculated_vs')
+                if calc_vs is not None:
+                    vs_values.append(calc_vs)
+        vs = int(np.mean(vs_values)) if vs_values else 0
         
         fig, ax = plt.subplots(1, 1, figsize=(10, 8))
         cycle_centroids = []  # (x_mean, y_mean, cycle_number)
@@ -3506,9 +3538,9 @@ def main():
             print(f"No data found in {week_folder}, skipping...")
             continue
         
-        print(f"Found {len(data_by_combination)} Filament-SVF-VS combinations")
+        print(f"Found {len(data_by_combination)} Filament-SVF combinations")
         for combo_key, combo_data in data_by_combination.items():
-            filament, svf, vs = combo_data['filament'], combo_data['svf'], combo_data['vs']
+            filament, svf = combo_data['filament'], combo_data['svf']
             filament_name = get_filament_name(filament)
             has_normal = 'normal' in combo_data and combo_data['normal']
             has_reprint = 'reprint' in combo_data and combo_data['reprint']
@@ -3517,7 +3549,16 @@ def main():
             normal_vs = combo_data.get('normal', {}).get('calculated_vs', 'N/A')
             reprint_vs = combo_data.get('reprint', {}).get('calculated_vs', 'N/A')
             
-            print(f"  {combo_key}: {filament_name}, SVF {svf}%, VS={vs} N/mm (calculated), Normal={has_normal} (VS={normal_vs}), Reprint={has_reprint} (VS={reprint_vs})")
+            # Compute average VS for display
+            vs_values = []
+            for test_type in ['normal', 'reprint']:
+                if test_type in combo_data and combo_data[test_type]:
+                    calc_vs = combo_data[test_type].get('calculated_vs')
+                    if calc_vs is not None:
+                        vs_values.append(calc_vs)
+            avg_vs = int(np.mean(vs_values)) if vs_values else 'N/A'
+            
+            print(f"  {combo_key}: {filament_name}, SVF {svf}%, Avg VS={avg_vs} N/mm, Normal={has_normal} (VS={normal_vs:.1f}), Reprint={has_reprint} (VS={reprint_vs if isinstance(reprint_vs, str) else f'{reprint_vs:.1f}'})")
         
         # Generate the three specific plot types requested
         print("\nGenerating plots...")
