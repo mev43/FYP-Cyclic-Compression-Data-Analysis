@@ -2843,13 +2843,27 @@ def plot_first_cycle_peak_force_histogram(csv_path):
             reprint_forces.append(row['Reprint_Peak'])
         
         x_pos = np.arange(len(combinations))
-        
-        # Create grouped bar chart for individual test values
+
+        # Create grouped bar chart for individual test values (strict RGB)
         width = 0.35
-        bars1 = ax1.bar(x_pos - width/2, normal_forces, width, label='Print 1', 
-                         color='lightblue', alpha=0.8, edgecolor='darkblue')
-        bars2 = ax1.bar(x_pos + width/2, reprint_forces, width, label='Print 2', 
-                         color='lightcoral', alpha=0.8, edgecolor='darkred')
+        bars1 = ax1.bar(
+            x_pos - width/2,
+            normal_forces,
+            width,
+            label='Print 1',
+            color='blue',
+            alpha=0.9,
+            edgecolor='black',
+        )
+        bars2 = ax1.bar(
+            x_pos + width/2,
+            reprint_forces,
+            width,
+            label='Print 2',
+            color='red',
+            alpha=0.9,
+            edgecolor='black',
+        )
         
         # Add error bars representing standard deviation
         # ax1.errorbar(x_pos, mean_forces, yerr=[row['Std_Peak_Force_kN'] for _, row in stats_df.iterrows()], 
@@ -2868,42 +2882,31 @@ def plot_first_cycle_peak_force_histogram(csv_path):
         ax1.grid(True, alpha=0.3, axis='y')
         ax1.legend(loc='upper left', fontsize=16)
         
-        # Create secondary y-axis for RSD
-        ax2 = ax1.twinx()
-        
-        # Plot individual RSD chains for each combination (not connected)
-        # Each combination gets its own separate visual indicator
-        colors = plt.cm.Set3(np.linspace(0, 1, len(combinations)))
-        
-        for i, (x, rsd, normal, reprint) in enumerate(zip(x_pos, rsd_values, normal_forces, reprint_forces)):
-            # Calculate RSD range for visual representation on secondary axis
-            combo_color = colors[i]
-            
-            # Convert force values to RSD axis scale for visualization
-            # We'll show the individual normal and reprint values as points on the RSD axis
-            # scaled relative to their contribution to the RSD calculation
-            mean_val = (normal + reprint) / 2
-            rsd_normal = ((normal - mean_val) / mean_val) * 100 + rsd  # Offset from RSD center
-            rsd_reprint = ((reprint - mean_val) / mean_val) * 100 + rsd  # Offset from RSD center
-            
-            # Plot the RSD chain for this combination (2 points connected)
-            ax2.plot([x-0.1, x+0.1], [rsd_normal, rsd_reprint], 
-                    color='black', linewidth=2, alpha=0.7, zorder=2, marker='o')
-
-            # Add RSD value label above the highest point of the line
-            max_rsd_point = max(rsd_normal, rsd_reprint)
-            ax2.annotate(f'{rsd:.1f}%', (x, max_rsd_point), textcoords="offset points", 
-                        xytext=(0,10), ha='center', fontsize=14, color='black')
-        ax2.tick_params(axis='both', which='major', labelsize=14)
-        ax2.set_ylabel('Relative Standard Deviation (%)', fontsize=16, color='black')
-        ax2.tick_params(axis='y', labelcolor='black')
-        
-        # Add custom legend for RSD visualization
-        from matplotlib.lines import Line2D
-        rsd_legend_elements = [
-            Line2D([0], [0], color='gray', linewidth=2, alpha=0.7, label='RSD Chain (Normal ↔ Reprint)')
-        ]
-        # ax2.legend(handles=rsd_legend_elements, loc='upper right')
+        # Add percent difference annotation above each pair (Print 2 vs Print 1)
+        max_height = 0.0
+        try:
+            max_height = float(np.nanmax(np.concatenate([np.array(normal_forces, dtype=float), np.array(reprint_forces, dtype=float)])))
+        except Exception:
+            pass
+        # Leave headroom for annotations
+        if max_height > 0:
+            ax1.set_ylim(top=max_height * 1.18)
+        for i, (xi, n_val, r_val) in enumerate(zip(x_pos, normal_forces, reprint_forces)):
+            if not np.isfinite(n_val) or not np.isfinite(r_val):
+                continue
+            # Percent change of Print 2 relative to Print 1
+            if n_val == 0:
+                denom = (n_val + r_val) / 2.0 if (n_val + r_val) != 0 else 0.0
+            else:
+                denom = n_val
+            if denom == 0:
+                continue
+            pct = ((r_val - n_val) / denom) * 100.0
+            sign = '+' if pct >= 0 else '−'  # use minus sign
+            txt = f"{sign}{abs(pct):.1f}%"
+            y_top = max(n_val, r_val)
+            ax1.text(xi, y_top + (0.03 * max_height if max_height > 0 else 0.05), txt,
+                     ha='center', va='bottom', fontsize=16, fontweight='bold', color='black')
         
         plt.tight_layout()
         
@@ -3000,10 +3003,24 @@ def plot_cycle_peak_force_histogram(csv_path, cycle_num):
 
         x_pos = np.arange(len(combinations))
         width = 0.35
-        ax1.bar(x_pos - width/2, normal_forces, width, label='Print 1', 
-                color='lightblue', alpha=0.8, edgecolor='darkblue')
-        ax1.bar(x_pos + width/2, reprint_forces, width, label='Print 2', 
-                color='lightcoral', alpha=0.8, edgecolor='darkred')
+        ax1.bar(
+            x_pos - width/2,
+            normal_forces,
+            width,
+            label='Print 1',
+            color='blue',
+            alpha=0.9,
+            edgecolor='black',
+        )
+        ax1.bar(
+            x_pos + width/2,
+            reprint_forces,
+            width,
+            label='Print 2',
+            color='red',
+            alpha=0.9,
+            edgecolor='black',
+        )
         # ax1.errorbar(x_pos, mean_forces, yerr=[row['Std_Peak_Force_kN'] for _, row in stats_df.iterrows()], 
         #               fmt='none', color='black', capsize=5, capthick=2, zorder=3)
         # ax1.scatter(x_pos, mean_forces, color='black', s=30, zorder=4, label='Mean (± SD)')
@@ -3016,28 +3033,29 @@ def plot_cycle_peak_force_histogram(csv_path, cycle_num):
         ax1.grid(True, alpha=0.3, axis='y')
         ax1.legend(loc='upper left', fontsize=16)
 
-        ax2 = ax1.twinx()
-        colors = plt.cm.Set3(np.linspace(0, 1, len(combinations)))
-        for i, (x, rsd, normal, reprint) in enumerate(zip(x_pos, rsd_values, normal_forces, reprint_forces)):
-            combo_color = colors[i]
-            mean_val = (normal + reprint) / 2 if (normal is not None and reprint is not None) else 0
-            if mean_val != 0:
-                rsd_normal = ((normal - mean_val) / mean_val) * 100 + rsd
-                rsd_reprint = ((reprint - mean_val) / mean_val) * 100 + rsd
-                ax2.plot([x-0.1, x+0.1], [rsd_normal, rsd_reprint], color='black', linewidth=2, alpha=0.7, zorder=2, marker='o')
-                # Add RSD value label above the highest point of the line
-                max_rsd_point = max(rsd_normal, rsd_reprint)
-                ax2.annotate(f'{rsd:.1f}%', (x, max_rsd_point), textcoords="offset points", 
-                             xytext=(0,10), ha='center', fontsize=14, color='black')
+        # Add percent difference annotation above each pair (Print 2 vs Print 1)
+        max_height = 0.0
+        try:
+            max_height = float(np.nanmax(np.concatenate([np.array(normal_forces, dtype=float), np.array(reprint_forces, dtype=float)])))
+        except Exception:
+            pass
+        if max_height > 0:
+            ax1.set_ylim(top=max_height * 1.18)
+        for i, (xi, n_val, r_val) in enumerate(zip(x_pos, normal_forces, reprint_forces)):
+            if not np.isfinite(n_val) or not np.isfinite(r_val):
+                continue
+            if n_val == 0:
+                denom = (n_val + r_val) / 2.0 if (n_val + r_val) != 0 else 0.0
             else:
-                # If mean_val is 0, just annotate at the rsd value
-                ax2.annotate(f'{rsd:.1f}%', (x, rsd), textcoords="offset points", 
-                             xytext=(0,10), ha='center', fontsize=14, color='black')
-        ax2.tick_params(axis='both', which='major', labelsize=14)
-        ax2.set_ylabel('Relative Standard Deviation (%)', fontsize=16, color='black')
-        ax2.tick_params(axis='y', labelcolor='black')
-        from matplotlib.lines import Line2D
-        # ax2.legend(handles=[Line2D([0], [0], color='gray', linewidth=2, alpha=0.7, label='RSD Chain (Normal ↔ Reprint)')], loc='upper right', fontsize=16)
+                denom = n_val
+            if denom == 0:
+                continue
+            pct = ((r_val - n_val) / denom) * 100.0
+            sign = '+' if pct >= 0 else '−'
+            txt = f"{sign}{abs(pct):.1f}%"
+            y_top = max(n_val, r_val)
+            ax1.text(xi, y_top + (0.03 * max_height if max_height > 0 else 0.05), txt,
+                     ha='center', va='bottom', fontsize=16, fontweight='bold', color='black')
 
         plt.tight_layout()
         output_path = Path(f'Test_1_Cycle_{cycle_num}_Peak_Force_Histogram.png')
