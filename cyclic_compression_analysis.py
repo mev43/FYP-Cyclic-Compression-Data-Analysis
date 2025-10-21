@@ -587,6 +587,14 @@ def plot_vs_groups_peak_force_comparison(data_by_combination, vs_groups, average
                     fontsize=16, fontweight='bold')
         ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
         ax.grid(True, alpha=0.3)
+        # Start axes at 0 on both axes
+        try:
+            x0, x1 = ax.get_xlim()
+            y0, y1 = ax.get_ylim()
+            ax.set_xlim(left=0, right=x1 if x1 > 0 else 1)
+            ax.set_ylim(bottom=0, top=y1 if y1 > 0 else 1)
+        except Exception:
+            pass
         
         # Add VS group annotation
         ax.text(0.02, 0.98, f'VS Group {group_idx+1}\n{vs_range} N/mm', 
@@ -842,6 +850,14 @@ def plot_combined_average_by_vs(data_by_combination):
     ax.set_title('Test 1 Combined Average Peak Force vs Cycle by Vertical Stiffness\n(All Normal & Reprint Tests Averaged)')
     ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', fontsize=16)
     ax.grid(True, alpha=0.3)
+    # Start axes at 0 on both axes
+    try:
+        x0, x1 = ax.get_xlim()
+        y0, y1 = ax.get_ylim()
+        ax.set_xlim(left=0, right=x1 if x1 > 0 else 1)
+        ax.set_ylim(bottom=0, top=y1 if y1 > 0 else 1)
+    except Exception:
+        pass
     
     plt.tight_layout()
     
@@ -928,6 +944,14 @@ def plot_by_filament_type(data_by_combination, test_name):
         # ax.set_title(f'{test_name} Peak Force vs Cycle (Averaged across two sets) - SVF {svf}%')
         ax.legend(fontsize=16, loc='upper right')
         ax.grid(True, alpha=0.3)
+        # Start axes at 0 on both axes
+        try:
+            x0, x1 = ax.get_xlim()
+            y0, y1 = ax.get_ylim()
+            ax.set_xlim(left=0, right=x1 if x1 > 0 else 1)
+            ax.set_ylim(bottom=0, top=y1 if y1 > 0 else 1)
+        except Exception:
+            pass
         
         plt.tight_layout()
         
@@ -1012,6 +1036,14 @@ def plot_by_svf_percentage(data_by_combination, test_name):
         # ax.set_title(f'{test_name} Peak Force vs Cycle (Averaged over two sets) - {filament_name}\n(Comparison across SVF Percentages)')
         ax.legend(fontsize=16, loc='upper right')
         ax.grid(True, alpha=0.3)
+        # Start axes at 0 on both axes
+        try:
+            x0, x1 = ax.get_xlim()
+            y0, y1 = ax.get_ylim()
+            ax.set_xlim(left=0, right=x1 if x1 > 0 else 1)
+            ax.set_ylim(bottom=0, top=y1 if y1 > 0 else 1)
+        except Exception:
+            pass
         
         # # Add filament annotation
         # ax.text(0.02, 0.98, f'{filament_name}', transform=ax.transAxes, 
@@ -1558,6 +1590,14 @@ def plot_pairwise_peak_force_vs_cycle(data_by_combination, test_name, pair_list)
         ax.legend(fontsize=16)
         ax.grid(True, alpha=0.3)
         plt.tight_layout()
+        # Start axes at 0 on both axes
+        try:
+            x0, x1 = ax.get_xlim()
+            y0, y1 = ax.get_ylim()
+            ax.set_xlim(left=0, right=x1 if x1 > 0 else 1)
+            ax.set_ylim(bottom=0, top=y1 if y1 > 0 else 1)
+        except Exception:
+            pass
         fname = f"{test_name}_{name1}_SVF_{s1}_vs_{name2}_SVF_{s2}_peak_force_vs_cycle.png"
         out_path = out_dir / fname
         plt.savefig(out_path, dpi=300, bbox_inches='tight')
@@ -1667,6 +1707,14 @@ def plot_normal_vs_reprint_comparison(data_by_combination, test_name):
         # ax1.set_title('Print 1', fontsize=16)
         if len(cx_n):
             ax1.legend(fontsize=16)
+        # Force axes to start at 0
+        try:
+            x0, x1 = ax1.get_xlim()
+            y0, y1 = ax1.get_ylim()
+            ax1.set_xlim(left=0, right=x1 if x1 > 0 else 1)
+            ax1.set_ylim(bottom=0, top=y1 if y1 > 0 else 1)
+        except Exception:
+            pass
 
         # Print 2 subplot
         if len(cx_r):
@@ -1677,6 +1725,14 @@ def plot_normal_vs_reprint_comparison(data_by_combination, test_name):
         # ax2.set_title('Print 2', fontsize=16)
         if len(cx_r):
             ax2.legend(fontsize=16)
+        # Force axes to start at 0
+        try:
+            x0, x1 = ax2.get_xlim()
+            y0, y1 = ax2.get_ylim()
+            ax2.set_xlim(left=0, right=x1 if x1 > 0 else 1)
+            ax2.set_ylim(bottom=0, top=y1 if y1 > 0 else 1)
+        except Exception:
+            pass
 
         # Overall (optional) super-title could be re-enabled if needed
         # fig.suptitle(f'{test_name} {name} SVF {s}% Peak Force vs Cycle', fontsize=15, fontweight='bold')
